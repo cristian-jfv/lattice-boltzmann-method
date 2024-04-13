@@ -1,2 +1,5 @@
 Eigen/
 build/
+.cache/
+cmake-command
+compile_commands.json
