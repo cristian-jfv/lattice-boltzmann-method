@@ -14,7 +14,7 @@ void f_eq(torch::Tensor& f_eq,
 void f_step(torch::Tensor& f_next,
 	    const torch::Tensor& f_curr,
 	    const torch::Tensor& f_eq,
-	    double tau);
+	    double eps);
 
 void p(torch::Tensor& p,
        const torch::Tensor& f);
