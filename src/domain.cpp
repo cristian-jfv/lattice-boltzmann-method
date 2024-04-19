@@ -4,8 +4,6 @@
 namespace domain
 {
 using torch::indexing::Slice;
-using std::cout;
-using std::endl;
 
 torch::Tensor left_boundary(torch::Tensor& domain)
 { return domain.index({Slice(), 0, Slice()}); }
@@ -48,6 +46,38 @@ void no_slip(torch::Tensor& boundary, interface itf)
     // f9 = f7
     boundary.index({Slice(1,-1), 9-1}) =
       boundary.index({Slice(1,-1), 7-1}).clone().detach();
+  }
+}
+
+void specular(torch::Tensor &boundary, interface itf)
+{
+  // Work columnwise
+  // Assume the wall velocity is zero
+  // TODO: Implement moving wall no slip condition
+
+  if (itf==interface::wall_to_fluid)
+  {
+    // f3 = f5
+    boundary.index({Slice(1,-1), 3-1}) =
+      boundary.index({Slice(1,-1), 5-1}).clone().detach();
+    // f6 = f9
+    boundary.index({Slice(1,-1), 6-1}) =
+      boundary.index({Slice(1,-1), 9-1}).clone().detach();
+    // f7 = f8
+    boundary.index({Slice(1,-1), 7-1}) =
+      boundary.index({Slice(1,-1), 8-1}).clone().detach();
+  }
+  else if (itf==interface::fluid_to_wall)
+  {
+    // f5 = f3
+    boundary.index({Slice(1,-1), 5-1}) =
+      boundary.index({Slice(1,-1), 3-1}).clone().detach();
+    // f8 = f7
+    boundary.index({Slice(1,-1), 8-1}) =
+      boundary.index({Slice(1,-1), 7-1}).clone().detach();
+    // f9 = f6
+    boundary.index({Slice(1,-1), 9-1}) =
+      boundary.index({Slice(1,-1), 6-1}).clone().detach();
   }
 }
 

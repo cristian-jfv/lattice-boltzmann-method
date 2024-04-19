@@ -17,6 +17,8 @@ torch::Tensor bottom_boundary(torch::Tensor& domain);
 
 void no_slip(torch::Tensor& boundary, interface itf);
 
+void specular(torch::Tensor& boundary, interface itf);
+
 void inlet(torch::Tensor& inlet, const torch::Tensor& outlet, double dp);
 
 void outlet(const torch::Tensor& inlet, torch::Tensor& outlet, double dp);

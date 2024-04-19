@@ -38,73 +38,74 @@ void f_step(torch::Tensor& f_next,
             const torch::Tensor& f_eq,
             double eps)
 {
-    auto temp = (f_curr - eps*(f_curr - f_eq)).clone().detach();
-    // Advect
-    // f1
-    f_next.index({Slice(), Slice(), 1-1}) =
-      temp.index({Slice(), Slice(), 1-1}).clone().detach();
+  //auto temp = (f_curr - eps*(f_curr - f_eq)).clone().detach();
+  auto temp = (f_curr*(1-eps) + f_eq*eps).clone().detach();
+  // Advect
+  // f1
+  f_next.index({Slice(), Slice(), 1-1}) =
+    temp.index({Slice(), Slice(), 1-1}).clone().detach();
 
-    // f2
-    f_next.index({Slice(), Slice(1,None), 2-1}) =
-      temp.index({Slice(), Slice(0,-1), 2-1}).clone().detach();
-    // f2 carry
-    f_next.index({Slice(), 0, 2-1}) =
-      f_curr.index({Slice(), 0, 2-1}).clone().detach();
+  // f2
+  f_next.index({Slice(), Slice(1,None), 2-1}) =
+    temp.index({Slice(), Slice(0,-1), 2-1}).clone().detach();
+  // f2 carry
+  f_next.index({Slice(), 0, 2-1}) =
+    f_curr.index({Slice(), 0, 2-1}).clone().detach();
 
-    // f3
-    f_next.index({Slice(0,-1), Slice(), 3-1}) =
-      temp.index({Slice(1,None), Slice(), 3-1}).clone().detach();
-    // f3 carry
-    f_next.index({-1, Slice(), 3-1}) =
-      f_curr.index({-1, Slice(), 3-1}).clone().detach();
+  // f3
+  f_next.index({Slice(0,-1), Slice(), 3-1}) =
+    temp.index({Slice(1,None), Slice(), 3-1}).clone().detach();
+  // f3 carry
+  f_next.index({-1, Slice(), 3-1}) =
+    f_curr.index({-1, Slice(), 3-1}).clone().detach();
 
-    // f4
-    f_next.index({Slice(), Slice(0,-1), 4-1}) =
-      temp.index({Slice(), Slice(1,None), 4-1}).clone().detach();
-    // f4 carry
-    f_next.index({Slice(), -1, 4-1}) =
-      f_curr.index({Slice(), -1, 4-1}).clone().detach();
+  // f4
+  f_next.index({Slice(), Slice(0,-1), 4-1}) =
+    temp.index({Slice(), Slice(1,None), 4-1}).clone().detach();
+  // f4 carry
+  f_next.index({Slice(), -1, 4-1}) =
+    f_curr.index({Slice(), -1, 4-1}).clone().detach();
 
-    // f5
-    f_next.index({Slice(1,None), Slice(), 5-1}) =
-      temp.index({Slice(0,-1), Slice(), 5-1}).clone().detach();
-    // f5 carry
-    f_next.index({0, Slice(), 5-1}) =
-      f_curr.index({0, Slice(), 5-1}).clone().detach();
+  // f5
+  f_next.index({Slice(1,None), Slice(), 5-1}) =
+    temp.index({Slice(0,-1), Slice(), 5-1}).clone().detach();
+  // f5 carry
+  f_next.index({0, Slice(), 5-1}) =
+    f_curr.index({0, Slice(), 5-1}).clone().detach();
 
-    // f6
-    f_next.index({Slice(0,-1), Slice(1,None), 6-1}) =
-      temp.index({Slice(1,None), Slice(0,-1), 6-1}).clone().detach();
-    // f6 carry
-    f_next.index({Slice(), 0, 6-1}) =
-      f_curr.index({Slice(), 0, 6-1}).clone().detach();
-    f_next.index({-1, Slice(), 6-1}) =
-      f_curr.index({-1, Slice(), 6-1}).clone().detach();
+  // f6
+  f_next.index({Slice(0,-1), Slice(1,None), 6-1}) =
+    temp.index({Slice(1,None), Slice(0,-1), 6-1}).clone().detach();
+  // f6 carry
+  f_next.index({Slice(), 0, 6-1}) =
+    f_curr.index({Slice(), 0, 6-1}).clone().detach();
+  f_next.index({-1, Slice(), 6-1}) =
+    f_curr.index({-1, Slice(), 6-1}).clone().detach();
 
 
-    // f7
-    f_next.index({Slice(0,-1), Slice(0,-1), 7-1}) =
-      temp.index({Slice(1,None), Slice(1,None), 7-1}).clone().detach();
-    f_next.index({Slice(), -1, 7-1}) =
-      f_curr.index({Slice(), -1, 7-1}).clone().detach();
-    f_next.index({-1, Slice(), 7-1}) =
-      f_curr.index({-1, Slice(), 7-1}).clone().detach();
+  // f7
+  f_next.index({Slice(0,-1), Slice(0,-1), 7-1}) =
+    temp.index({Slice(1,None), Slice(1,None), 7-1}).clone().detach();
+  f_next.index({Slice(), -1, 7-1}) =
+    f_curr.index({Slice(), -1, 7-1}).clone().detach();
+  f_next.index({-1, Slice(), 7-1}) =
+    f_curr.index({-1, Slice(), 7-1}).clone().detach();
 
-    // f8
-    f_next.index({Slice(1,None), Slice(0,-1), 8-1}) =
-      temp.index({Slice(0,-1), Slice(1,None), 8-1}).clone().detach();
-    f_next.index({Slice(), -1, 8-1}) =
-      f_curr.index({Slice(), -1, 8-1}).clone().detach();
-    f_next.index({0, Slice(), 8-1}) =
-      f_curr.index({0, Slice(), 8-1}).clone().detach();
+  // f8
+  f_next.index({Slice(1,None), Slice(0,-1), 8-1}) =
+    temp.index({Slice(0,-1), Slice(1,None), 8-1}).clone().detach();
+  f_next.index({Slice(), -1, 8-1}) =
+    f_curr.index({Slice(), -1, 8-1}).clone().detach();
+  f_next.index({0, Slice(), 8-1}) =
+    f_curr.index({0, Slice(), 8-1}).clone().detach();
 
-    // f9
-    f_next.index({Slice(1,None), Slice(1,None), 9-1}) =
-      temp.index({Slice(0,-1), Slice(0,-1), 9-1}).clone().detach();
-    f_next.index({0, Slice(), 9-1}) =
-      f_curr.index({0, Slice(), 9-1}).clone().detach();
-    f_next.index({Slice(), 0, 9-1}) =
-      f_curr.index({Slice(), 0, 9-1}).clone().detach();
+  // f9
+  f_next.index({Slice(1,None), Slice(1,None), 9-1}) =
+    temp.index({Slice(0,-1), Slice(0,-1), 9-1}).clone().detach();
+  f_next.index({0, Slice(), 9-1}) =
+    f_curr.index({0, Slice(), 9-1}).clone().detach();
+  f_next.index({Slice(), 0, 9-1}) =
+    f_curr.index({Slice(), 0, 9-1}).clone().detach();
 }
 
 void recover_corners(torch::Tensor& f_next)

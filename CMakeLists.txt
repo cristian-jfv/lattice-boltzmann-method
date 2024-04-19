@@ -22,13 +22,18 @@ target_link_libraries(domain "${TORCH_LIBRARIES}")
 target_include_directories(domain ${warning_guard} PUBLIC
 				"\$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src")
 
-add_executable(test test/test.cpp)
-set_property(TARGET test PROPERTY CXX_STANDARD 17)
-target_link_libraries(test PRIVATE "${TORCH_LIBRARIES}" params solver domain)
+add_executable(domain_boundaries_test test/domain_boundaries_test.cpp)
+set_property(TARGET domain_boundaries_test PROPERTY CXX_STANDARD 17)
+target_link_libraries(domain_boundaries_test
+		PRIVATE "${TORCH_LIBRARIES}" params solver domain)
 
-add_executable(test_horizontal_poiseuille test/test_horizontal_poiseuille.cpp)
-set_property(TARGET test_horizontal_poiseuille PROPERTY CXX_STANDARD 17)
-target_link_libraries(test_horizontal_poiseuille
-	PRIVATE "${TORCH_LIBRARIES}" params solver domain)
+add_executable(horizontal_poiseuille_test test/horizontal_poiseuille_test.cpp)
+set_property(TARGET horizontal_poiseuille_test PROPERTY CXX_STANDARD 17)
+target_link_libraries(horizontal_poiseuille_test
+		PRIVATE "${TORCH_LIBRARIES}" params solver domain)
 
+add_executable(specular_boundary_test test/specular_boundary_test.cpp)
+set_property(TARGET specular_boundary_test PROPERTY CXX_STANDARD 17)
+target_link_libraries(specular_boundary_test
+		PRIVATE "${TORCH_LIBRARIES}" params solver domain)
 
