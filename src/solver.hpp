@@ -2,6 +2,8 @@
 #define SOLVER_HPP
 #include <torch/torch.h>
 
+namespace solver
+{
 void initialize(double rho_0, double p_0,
 		torch::Tensor& f,
 		torch::Tensor& u,
@@ -16,9 +18,12 @@ void f_step(torch::Tensor& f_next,
 	    const torch::Tensor& f_eq,
 	    double eps);
 
+void recover_corners(torch::Tensor& f_next);
+
 void p(torch::Tensor& p,
        const torch::Tensor& f);
 
 void u(torch::Tensor& u,
        const torch::Tensor& f);
+}
 #endif
