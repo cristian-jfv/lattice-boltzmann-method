@@ -6,10 +6,10 @@ namespace domain
 using torch::indexing::Slice;
 
 torch::Tensor left_boundary(torch::Tensor& domain)
-{ return domain.index({Slice(), 0, Slice()}); }
+{ return domain.index({Slice(1,-1), 0, Slice()}); }
 
 torch::Tensor right_boundary(torch::Tensor& domain)
-{ return domain.index({Slice(), -1, Slice()}); }
+{ return domain.index({Slice(1,-1), -1, Slice()}); }
 
 torch::Tensor top_boundary(torch::Tensor& domain)
 { return domain.index({0, Slice(), Slice()}); }

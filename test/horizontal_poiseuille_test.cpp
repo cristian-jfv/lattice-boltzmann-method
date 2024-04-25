@@ -1,124 +1,132 @@
-#include <cassert>
 #include <iostream>
+#include <cmath>
 #include <ostream>
-#include <torch/serialize.h>
 #include <torch/torch.h>
+
 #include "../src/solver.hpp"
-#include "../src/domain.hpp"
+#include "../src/utils.hpp"
 
-using namespace std;
+using std::cout;
+using std::endl;
+using torch::Tensor;
+using torch::indexing::Slice;
+using torch::indexing::Ellipsis;
+using utils::print;
+using utils::indices;
 
-void store_tensor(const torch::Tensor& source, torch::Tensor& target, int i)
+// Boundaries
+const indices virtual_inlet{0, Ellipsis};
+const indices inlet{1, Ellipsis};
+const indices outlet{-2, Ellipsis};
+const indices virtual_outlet{-1, Ellipsis};
+
+void periodic_boundary_condition
+(
+  torch::Tensor& f_coll,
+  const torch::Tensor& f_equi,
+  const torch::Tensor& u,
+  const torch::Tensor& rho,
+  const double rho_inlet,
+  const double rho_outlet
+)
 {
-  using torch::indexing::Slice;
-    // Save results
-    target.index({Slice(), Slice(), Slice(), i}) =
-      source.index({Slice(), Slice(), Slice()}).clone().detach();
+  torch::Tensor temp_equi = torch::zeros({1, u.sizes()[1], 9});
+  torch::Tensor temp_rho = torch::ones({1, u.sizes()[1], 1});
+
+  // inlet
+  solver::equilibrium(temp_equi, u.index(outlet).unsqueeze(0), rho_inlet*temp_rho);
+  f_coll.index(virtual_inlet) = (temp_equi + f_coll.index(outlet) - f_equi.index(outlet)).squeeze(0).clone().detach();
+
+  // outlet
+  solver::equilibrium(temp_equi, u.index(inlet).unsqueeze(0), rho_outlet*temp_rho);
+  f_coll.index(virtual_outlet) = (temp_equi + f_coll.index(inlet) - f_equi.index(inlet)).squeeze(0).clone().detach();
 }
 
 int main()
 {
-  using torch::Tensor;
-  using torch::indexing::Slice;
-  using torch::indexing::None;
-
-  cout << "\nProgram starts" << endl;
-  const double rho_0 = 1.0;
-  const double p_0 = 1.0;
-  const double tau = 0.95;
-  const double eps = 1.0/tau;
+  // Flow parameters
+  const int T = 10000;
+  print("T", T);
   const int H = 51;
   const int W = 51;
-  const int T = 10000; // TODO: Calculate number of time steps required
-  const double dp = 0.00108;
+  cout << "H=" << H << "; W=" << W << endl;
+  const double tau = std::sqrt(3.0/16.0) + 0.5;
+  const double omega = 1.0/tau;
+  cout << "omega=" << omega << endl;
+  const double u_max = 0.1;
+  const double nu = (2.0 * tau -1.0)/6.0;
+  cout << "nu=" << nu << endl;
+  const double Re = W*u_max/nu;
+  cout << "Re=" << Re << endl;
+  const double p_grad = 8.0*nu*u_max/(W*W);
+  cout << "grad(p)=" << p_grad << endl;
+  const double rho_outlet = 1.0;
+  const double rho_inlet = 3.0*(H-1)*p_grad + rho_outlet;
+  cout << "rho_inlet=" << rho_inlet << endl;
 
-  // Initialize matrices
-  Tensor f_curr = torch::zeros({H,W,9});
-  Tensor f_next = torch::zeros_like(f_curr);
-  Tensor f_equi = torch::zeros_like(f_curr);
-  Tensor u_tens = torch::zeros({H,W,2});
-  Tensor p_tens = torch::zeros({H,W,1});
+  // Tensors
+  Tensor f_equi = torch::zeros({H,W,9});
+  Tensor f_coll = torch::zeros_like(f_equi);
+  Tensor f_adve = torch::zeros_like(f_equi);
+  Tensor u = torch::zeros({H,W,2});
+  Tensor rho = torch::ones({H,W,1});
 
-  solver::initialize(rho_0, p_0, f_curr, u_tens, p_tens);
-  // Create views for the domain boundaries
-  auto top = domain::top_boundary(f_next);
-  auto bottom = domain::bottom_boundary(f_next);
-  auto left = domain::left_boundary(f_next);
-  auto right = domain::right_boundary(f_next);
+  // Results
+  Tensor fs = torch::zeros({H,W,9,T});
+  Tensor ux = torch::zeros({H,W,T});
+  Tensor uy = torch::zeros({H,W,T});
+  Tensor rhos = torch::zeros({H,W,T});
 
-  // Results storage
-  Tensor ux = torch::zeros({H, W, T});
-  Tensor uy = torch::zeros({H, W, T});
-  Tensor ps = torch::zeros({H, W, T});
-  Tensor fs = torch::zeros({H, W, 9, T});
+  // Initialisation
+  solver::equilibrium(f_adve, u, rho);
 
   // Main loop
-  cout << "===================================================================" << endl;
-  cout << "Main loop starts" << endl;
-  cout << "===================================================================" << endl;
-
-  for (int i=0; i<T; i++)
+  print("main loop starts");
+  for (int t=0; t < T; t++)
   {
-    cout << i << "\t\r" << flush;
-    // Save results
-    ux.index({Slice(), Slice(), i}) = u_tens.index({Slice(), Slice(), 0}).clone().detach();
-    uy.index({Slice(), Slice(), i}) = u_tens.index({Slice(), Slice(), 1}).clone().detach();
-    ps.index({Slice(), Slice(), i}) = p_tens.index({Slice(), Slice(), 0}).clone().detach();
-    store_tensor(f_curr, fs, i);
+    cout << t << "\t\r" << std::flush;
+    //print("save fs");
+    fs.index_put_({Ellipsis,t}, f_adve);
+    //print("save ux");
+    ux.index_put_({Ellipsis,t}, u.index({Ellipsis,0}));
+    //print("save uy");
+    uy.index_put_({Ellipsis,t}, u.index({Ellipsis,1}));
+    //print("save rho");
+    rhos.index_put_({Ellipsis,t}, rho.squeeze(2));
 
-    solver::f_eq(f_equi, u_tens, p_tens);
-    solver::f_step(f_next, f_curr, f_equi, eps);
+    // Calculate macroscopic variables
+    //print("calculate macroscopic variables");
+    solver::calc_rho(rho, f_adve);
+    solver::calc_u(u, f_adve, rho);
+    // Compute equilibrium
+    //print("compute equilibrium");
+    solver::equilibrium(f_equi, u, rho);
+    // Collision, BGK operator
+    //print("collision step");
+    solver::collision(f_coll, f_adve, f_equi, omega);
+    // Inlet and outlet periodic boundary conditions
+    //print("inlet-outlet priodic boundary condition");
+    periodic_boundary_condition(f_coll, f_equi, u, rho, rho_inlet, rho_outlet);
+    // Advection
+    //print("advection step");
+    solver::advect(f_adve, f_coll);
 
-    // Enforce boundary conditions
-    // Inlet at LEFT
-    domain::inlet(left, right, dp);
-    // Outlet at RIGHT
-    domain::outlet(left, right, dp);
-    // No slip at TOP
-    domain::no_slip(top, domain::interface::fluid_to_wall);
-    // No slip at BOTTOM
-    domain::no_slip(bottom, domain::interface::wall_to_fluid);
+    // No slip boundary conditions
+    f_adve.index({Slice(), -1, 4}) = f_coll.index({Slice(), -1, 2});
+    f_adve.index({Slice(), -1, 7}) = f_coll.index({Slice(), -1, 5});
+    f_adve.index({Slice(), -1, 8}) = f_coll.index({Slice(), -1, 6});
 
-    // Recover coners
-    solver::recover_corners(f_next);
-/*  f_next.index({0,0,6-1}) = f_next.index({0,0,8-1}).clone().detach();
-    f_next.index({0,-1,6-1}) = f_next.index({0,-1,8-1}).clone().detach();
+    f_adve.index({Slice(), 0, 2}) = f_coll.index({Slice(), 0, 4});
+    f_adve.index({Slice(), 0, 5}) = f_coll.index({Slice(), 0, 7});
+    f_adve.index({Slice(), 0, 6}) = f_coll.index({Slice(), 0, 8});
 
-    f_next.index({0,0,7-1}) = f_next.index({0,0,9-1}).clone().detach();
-    f_next.index({0,-1,7-1}) = f_next.index({0,-1,9-1}).clone().detach();
-
-    f_next.index({-1,0,8-1}) = f_next.index({-1,0,6-1}).clone().detach();
-    f_next.index({-1,-1,8-1}) = f_next.index({-1,-1,6-1}).clone().detach();
-
-    f_next.index({-1,0,9-1}) = f_next.index({-1,0,7-1}).clone().detach();
-    f_next.index({-1,-1,9-1}) = f_next.index({-1,-1,7-1}).clone().detach();
-*/
-    f_curr = f_next.clone().detach();
-
-    solver::u(u_tens, f_curr);
-    solver::p(p_tens, f_curr);
   }
 
   // Save results
-  if (true)
-  {
-    torch::save(ux, "hpt-ux.pt");
-    torch::save(uy, "hpt-uy.pt");
-    torch::save(ps, "hpt-ps.pt");
-    torch::save(fs, "hpt-fs.pt");
-  }
-  // Check results
-  Tensor last_ux = u_tens.index({Slice(), 0, 0}).clone().detach()/0.03;
-  Tensor x = torch::linspace(0, 1, W);
-  Tensor analytical_u = 6.0*x*(1.0 - x);
-  const double rmse = ( ((last_ux - analytical_u).pow(2)).sum()/W  ).sqrt().item<double>();
-  const double error_percent = rmse*100.0/1.5;
-  cout << "RMSE=" << rmse << endl;
-  cout << "percent=" << error_percent << endl;
-  /*
-  assert(error_percent <= 1.0 
-         && "Simulation yields a different result to the analytical solution");
-  */
-  cout << "Program ends" << endl;
+  print("saving results into files");
+  torch::save(ux, "hpt-ux.pt");
+  torch::save(uy, "hpt-uy.pt");
+  torch::save(fs, "hpt-fs.pt");
+  torch::save(rhos/3.0, "hpt-ps.pt");
   return 0;
 }

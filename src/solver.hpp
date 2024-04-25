@@ -4,26 +4,26 @@
 
 namespace solver
 {
-void initialize(double rho_0, double p_0,
-		torch::Tensor& f,
-		torch::Tensor& u,
-		torch::Tensor& p);
+void calc_rho(torch::Tensor& rho, const torch::Tensor& f);
 
-void f_eq(torch::Tensor& f_eq,
-	  const torch::Tensor& u,
-	  const torch::Tensor& p);
+void calc_u(torch::Tensor& u, const torch::Tensor& f, const torch::Tensor& rho);
 
-void f_step(torch::Tensor& f_next,
-	    const torch::Tensor& f_curr,
-	    const torch::Tensor& f_eq,
-	    double eps);
+void collision
+(
+  torch::Tensor& f_coll,
+  const torch::Tensor& f_curr,
+  const torch::Tensor& f_equi,
+  const double omega
+);
 
-void recover_corners(torch::Tensor& f_next);
+void equilibrium
+(
+  torch::Tensor &f_eq,
+  const torch::Tensor &u,
+  const torch::Tensor &rho
+);
 
-void p(torch::Tensor& p,
-       const torch::Tensor& f);
+void advect(torch::Tensor& g, const torch::Tensor& f);
 
-void u(torch::Tensor& u,
-       const torch::Tensor& f);
 }
 #endif

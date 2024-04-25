@@ -4,6 +4,7 @@ namespace solver
 {
 using torch::indexing::Slice;
 using torch::indexing::None;
+using torch::indexing::Ellipsis;
 
 const torch::Tensor E = torch::tensor(
   {4.0/ 9.0,
@@ -13,125 +14,96 @@ const torch::Tensor c = torch::tensor(
   {{0.0, 1.0, 0.0, -1.0,  0.0,  1.0, -1.0, -1.0,  1.0},
    {0.0, 0.0, 1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0}});
 
-void initialize(double rho_0, double p_0,
-                torch::Tensor &f,
-                torch::Tensor &u,
-                torch::Tensor &p)
+void calc_rho(torch::Tensor& rho, const torch::Tensor& f)
 {
-  // Fill f, u, and p with initial values
-  u =torch::zeros_like(u);
-  p = (rho_0/3.0)*torch::ones_like(p);
-  f_eq(f, u, p);
+    rho = f.sum_to_size(rho.sizes()).clone().detach();
 }
 
-void f_eq(torch::Tensor &f_eq,
-          const torch::Tensor &u,
-          const torch::Tensor &p)
+void calc_u(torch::Tensor& u, const torch::Tensor& f, const torch::Tensor& rho)
 {
-  auto u_u = (u*u).sum_to_size(p.sizes());
+  u = (matmul(f, c.transpose(0,1))/rho).clone().detach();
+}
+
+void equilibrium
+(
+  torch::Tensor &f_eq,
+  const torch::Tensor &u,
+  const torch::Tensor &rho
+)
+{
+  auto u_u = (u*u).sum_to_size(rho.sizes());
   auto c_u = matmul(u, c);
-  f_eq = mul(3.0*p + 3.0*c_u + 4.5*c_u.pow(2) - 1.5*u_u, E).clone().detach();
+  auto A = 1.0 + 3.0*c_u + 4.5*c_u.pow(2) - 1.5*u_u;
+  f_eq = mul(rho*A, E).clone().detach();
 }
 
-void f_step(torch::Tensor& f_next,
-            const torch::Tensor& f_curr,
-            const torch::Tensor& f_eq,
-            double eps)
+
+void collision
+(
+  torch::Tensor& f_coll,
+  const torch::Tensor& f_curr,
+  const torch::Tensor& f_equi,
+  const double omega
+)
 {
-  //auto temp = (f_curr - eps*(f_curr - f_eq)).clone().detach();
-  auto temp = (f_curr*(1-eps) + f_eq*eps).clone().detach();
+  f_coll = ( (1.0-omega)*f_curr + omega*f_equi ).clone().detach();
+}
+
+void advect(torch::Tensor& g, const torch::Tensor& f)
+{
   // Advect
+  // f0
+  g.index({Ellipsis}) = f.index({Ellipsis}).clone().detach();
+
   // f1
-  f_next.index({Slice(), Slice(), 1-1}) =
-    temp.index({Slice(), Slice(), 1-1}).clone().detach();
+  //print("f1");
+  g.index({Slice(1,None), Slice(), 1}) = f.index({Slice(0,-1), Slice(), 1}).clone().detach();
+  g.index({0, Slice(), 1}) = f.index({-1, Slice(), 1}).clone().detach();
 
   // f2
-  f_next.index({Slice(), Slice(1,None), 2-1}) =
-    temp.index({Slice(), Slice(0,-1), 2-1}).clone().detach();
-  // f2 carry
-  f_next.index({Slice(), 0, 2-1}) =
-    f_curr.index({Slice(), 0, 2-1}).clone().detach();
+  //print("f2");
+  g.index({Slice(), Slice(1,None), 2}) = f.index({Slice(), Slice(0,-1), 2}).clone().detach();
+  g.index({Slice(), 0, 2}) = f.index({Slice(), -1, 2}).clone().detach();
 
   // f3
-  f_next.index({Slice(0,-1), Slice(), 3-1}) =
-    temp.index({Slice(1,None), Slice(), 3-1}).clone().detach();
-  // f3 carry
-  f_next.index({-1, Slice(), 3-1}) =
-    f_curr.index({-1, Slice(), 3-1}).clone().detach();
+  //print("f3");
+  g.index({Slice(0,-1), Slice(), 3}) = f.index({Slice(1,None), Slice(), 3}).clone().detach();
+  g.index({-1, Slice(), 3}) = f.index({0,Slice(),3}).clone().detach();
 
   // f4
-  f_next.index({Slice(), Slice(0,-1), 4-1}) =
-    temp.index({Slice(), Slice(1,None), 4-1}).clone().detach();
-  // f4 carry
-  f_next.index({Slice(), -1, 4-1}) =
-    f_curr.index({Slice(), -1, 4-1}).clone().detach();
+  //print("f4");
+  g.index({Slice(), Slice(0,-1), 4}) = f.index({Slice(), Slice(1,None), 4}).clone().detach();
+  g.index({Slice(), -1, 4}) = f.index({Slice(), 0, 4}).clone().detach();
 
   // f5
-  f_next.index({Slice(1,None), Slice(), 5-1}) =
-    temp.index({Slice(0,-1), Slice(), 5-1}).clone().detach();
-  // f5 carry
-  f_next.index({0, Slice(), 5-1}) =
-    f_curr.index({0, Slice(), 5-1}).clone().detach();
+  //print("f5");
+  g.index({Slice(1,None), Slice(1,None), 5}) = f.index({Slice(0,-1), Slice(0,-1),5}).clone().detach();
+  g.index({0, Slice(1,None), 5}) = f.index({-1, Slice(0,-1), 5}).clone().detach();
+  g.index({Slice(1,None), 0, 5}) = f.index({Slice(0,-1), -1, 5}).clone().detach();
+  g.index({0, 0, 5}) = f.index({-1, -1, 5}).clone().detach();
 
   // f6
-  f_next.index({Slice(0,-1), Slice(1,None), 6-1}) =
-    temp.index({Slice(1,None), Slice(0,-1), 6-1}).clone().detach();
-  // f6 carry
-  f_next.index({Slice(), 0, 6-1}) =
-    f_curr.index({Slice(), 0, 6-1}).clone().detach();
-  f_next.index({-1, Slice(), 6-1}) =
-    f_curr.index({-1, Slice(), 6-1}).clone().detach();
-
+  //print("f6");
+  g.index({Slice(0,-1), Slice(1,None), 6}) = f.index({Slice(1,None), Slice(0,-1), 6}).clone().detach();
+  g.index({-1, Slice(1,None), 6}) = f.index({0, Slice(0,-1), 6}).clone().detach();
+  g.index({Slice(0,-1), 0, 6}) = f.index({Slice(1,None), -1, 6}).clone().detach();
+  g.index({-1, 0, 6}) = f.index({0, -1, 6}).clone().detach();
 
   // f7
-  f_next.index({Slice(0,-1), Slice(0,-1), 7-1}) =
-    temp.index({Slice(1,None), Slice(1,None), 7-1}).clone().detach();
-  f_next.index({Slice(), -1, 7-1}) =
-    f_curr.index({Slice(), -1, 7-1}).clone().detach();
-  f_next.index({-1, Slice(), 7-1}) =
-    f_curr.index({-1, Slice(), 7-1}).clone().detach();
+  //print("f7");
+  g.index({Slice(0,-1), Slice(0,-1), 7}) = f.index({Slice(1,None), Slice(1,None), 7}).clone().detach();
+  g.index({-1, Slice(0,-1), 7}) = f.index({0, Slice(1,None), 7}).clone().detach();
+  g.index({Slice(0,-1), -1, 7}) = f.index({Slice(1,None), 0, 7}).clone().detach();
+  g.index({-1, -1, 7}) = f.index({0, 0, 7}).clone().detach();
 
   // f8
-  f_next.index({Slice(1,None), Slice(0,-1), 8-1}) =
-    temp.index({Slice(0,-1), Slice(1,None), 8-1}).clone().detach();
-  f_next.index({Slice(), -1, 8-1}) =
-    f_curr.index({Slice(), -1, 8-1}).clone().detach();
-  f_next.index({0, Slice(), 8-1}) =
-    f_curr.index({0, Slice(), 8-1}).clone().detach();
+  //print("f8");
+  g.index({Slice(1,None), Slice(0,-1), 8}) = f.index({Slice(0,-1), Slice(1,None), 8}).clone().detach();
+  g.index({0, Slice(0,-1), 8}) = f.index({-1, Slice(1,None), 8});
+  g.index({Slice(1,None), -1, 8}) = f.index({Slice(0,-1), 0, 8});
+  g.index({-1, 0, 8}) = f.index({0, -1, 8}).clone().detach();
 
-  // f9
-  f_next.index({Slice(1,None), Slice(1,None), 9-1}) =
-    temp.index({Slice(0,-1), Slice(0,-1), 9-1}).clone().detach();
-  f_next.index({0, Slice(), 9-1}) =
-    f_curr.index({0, Slice(), 9-1}).clone().detach();
-  f_next.index({Slice(), 0, 9-1}) =
-    f_curr.index({Slice(), 0, 9-1}).clone().detach();
+  //print("end of advect function");
 }
 
-void recover_corners(torch::Tensor& f_next)
-{
-    f_next.index({0,0,6-1}) = f_next.index({0,0,8-1}).clone().detach();
-    f_next.index({0,-1,6-1}) = f_next.index({0,-1,8-1}).clone().detach();
-
-    f_next.index({0,0,7-1}) = f_next.index({0,0,9-1}).clone().detach();
-    f_next.index({0,-1,7-1}) = f_next.index({0,-1,9-1}).clone().detach();
-
-    f_next.index({-1,0,8-1}) = f_next.index({-1,0,6-1}).clone().detach();
-    f_next.index({-1,-1,8-1}) = f_next.index({-1,-1,6-1}).clone().detach();
-
-    f_next.index({-1,0,9-1}) = f_next.index({-1,0,7-1}).clone().detach();
-    f_next.index({-1,-1,9-1}) = f_next.index({-1,-1,7-1}).clone().detach();
-}
-
-void p(torch::Tensor& p,
-       const torch::Tensor& f)
-{
-  p = f.sum_to_size(p.sizes()).clone().detach()/3.0;
-}
-
-void u(torch::Tensor& u,
-       const torch::Tensor& f)
-{
-  u = matmul(f, c.transpose(0,1)).clone().detach();
-}
 }
