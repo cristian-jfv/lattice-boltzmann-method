@@ -39,6 +39,11 @@ set_property(TARGET horizontal_poiseuille_test PROPERTY CXX_STANDARD 17)
 target_link_libraries(horizontal_poiseuille_test
 		PRIVATE "${TORCH_LIBRARIES}" params solver domain utils)
 
+add_executable(vertical_poiseuille_test test/vertical_poiseuille_test.cpp)
+set_property(TARGET vertical_poiseuille_test PROPERTY CXX_STANDARD 17)
+target_link_libraries(vertical_poiseuille_test
+		PRIVATE "${TORCH_LIBRARIES}" params solver domain utils)
+
 add_executable(specular_boundary_test test/specular_boundary_test.cpp)
 set_property(TARGET specular_boundary_test PROPERTY CXX_STANDARD 17)
 target_link_libraries(specular_boundary_test

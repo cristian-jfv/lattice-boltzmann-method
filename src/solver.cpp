@@ -1,4 +1,6 @@
 # include "solver.hpp"
+#include <c10/core/DefaultDtype.h>
+#include <iostream>
 
 namespace solver
 {
@@ -9,19 +11,37 @@ using torch::indexing::Ellipsis;
 const torch::Tensor E = torch::tensor(
   {4.0/ 9.0,
     1.0/ 9.0, 1.0/ 9.0, 1.0/ 9.0, 1.0/ 9.0,
-    1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0});
+    1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0}, torch::TensorOptions().dtype(torch::kDouble));
 const torch::Tensor c = torch::tensor(
   {{0.0, 1.0, 0.0, -1.0,  0.0,  1.0, -1.0, -1.0,  1.0},
-   {0.0, 0.0, 1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0}});
+   {0.0, 0.0, 1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0}}, torch::TensorOptions().dtype(torch::kDouble));
 
 void calc_rho(torch::Tensor& rho, const torch::Tensor& f)
 {
     rho = f.sum_to_size(rho.sizes()).clone().detach();
 }
 
+void calc_incomp_u(torch::Tensor& u, const torch::Tensor& f)
+{
+  u = (matmul(f, c.transpose(0,1))).clone().detach();
+}
+
+
 void calc_u(torch::Tensor& u, const torch::Tensor& f, const torch::Tensor& rho)
 {
   u = (matmul(f, c.transpose(0,1))/rho).clone().detach();
+}
+
+void incomp_equilibrium
+(
+  torch::Tensor &f_eq,
+  const torch::Tensor &u,
+  const torch::Tensor &rho
+)
+{
+  auto c_u = matmul(u, c);
+  auto A = rho + 3.0*c_u;
+  f_eq = mul(A,E).clone().detach();
 }
 
 void equilibrium
@@ -101,7 +121,7 @@ void advect(torch::Tensor& g, const torch::Tensor& f)
   g.index({Slice(1,None), Slice(0,-1), 8}) = f.index({Slice(0,-1), Slice(1,None), 8}).clone().detach();
   g.index({0, Slice(0,-1), 8}) = f.index({-1, Slice(1,None), 8});
   g.index({Slice(1,None), -1, 8}) = f.index({Slice(0,-1), 0, 8});
-  g.index({-1, 0, 8}) = f.index({0, -1, 8}).clone().detach();
+  g.index({0, -1, 8}) = f.index({-1, 0, 8}).clone().detach();
 
   //print("end of advect function");
 }

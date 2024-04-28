@@ -1,3 +1,4 @@
+#include <ATen/TensorIndexing.h>
 #include <iostream>
 #include <cmath>
 #include <ostream>
@@ -15,10 +16,10 @@ using utils::print;
 using utils::indices;
 
 // Boundaries
-const indices virtual_inlet{0, Ellipsis};
-const indices inlet{1, Ellipsis};
-const indices outlet{-2, Ellipsis};
-const indices virtual_outlet{-1, Ellipsis};
+const indices virtual_inlet{Slice(), 0,Ellipsis};
+const indices inlet{Slice(), 1, Ellipsis};
+const indices outlet{Slice(), -2, Ellipsis};
+const indices virtual_outlet{Slice(), -1, Ellipsis};
 
 void periodic_boundary_condition
 (
@@ -34,11 +35,11 @@ void periodic_boundary_condition
   torch::Tensor temp_rho = torch::ones({1, u.sizes()[1], 1});
 
   // inlet
-  solver::incomp_equilibrium(temp_equi, u.index(outlet).unsqueeze(0), rho_inlet*temp_rho);
+  solver::equilibrium(temp_equi, u.index(outlet).unsqueeze(0), rho_inlet*temp_rho);
   f_coll.index(virtual_inlet) = (temp_equi + f_coll.index(outlet) - f_equi.index(outlet)).squeeze(0).clone().detach();
 
   // outlet
-  solver::incomp_equilibrium(temp_equi, u.index(inlet).unsqueeze(0), rho_outlet*temp_rho);
+  solver::equilibrium(temp_equi, u.index(inlet).unsqueeze(0), rho_outlet*temp_rho);
   f_coll.index(virtual_outlet) = (temp_equi + f_coll.index(inlet) - f_equi.index(inlet)).squeeze(0).clone().detach();
 }
 
@@ -65,7 +66,6 @@ int main()
   cout << "rho_inlet=" << rho_inlet << endl;
 
   // Tensors
-  torch::set_default_dtype(caffe2::scalarTypeToTypeMeta(torch::kDouble));
   Tensor f_equi = torch::zeros({H,W,9});
   Tensor f_coll = torch::zeros_like(f_equi);
   Tensor f_adve = torch::zeros_like(f_equi);
@@ -79,7 +79,7 @@ int main()
   Tensor rhos = torch::zeros({H,W,T});
 
   // Initialisation
-  solver::incomp_equilibrium(f_adve, u, rho);
+  solver::equilibrium(f_adve, u, rho);
 
   // Main loop
   print("main loop starts");
@@ -98,10 +98,10 @@ int main()
     // Calculate macroscopic variables
     //print("calculate macroscopic variables");
     solver::calc_rho(rho, f_adve);
-    solver::calc_incomp_u(u, f_adve);
+    solver::calc_u(u, f_adve, rho);
     // Compute equilibrium
     //print("compute equilibrium");
-    solver::incomp_equilibrium(f_equi, u, rho);
+    solver::equilibrium(f_equi, u, rho);
     // Collision, BGK operator
     //print("collision step");
     solver::collision(f_coll, f_adve, f_equi, omega);
@@ -112,22 +112,22 @@ int main()
     //print("advection step");
     solver::advect(f_adve, f_coll);
 
-    // Specular boundary conditions
-    f_adve.index({Slice(), -1, 4}) = f_coll.index({Slice(), -1, 2}).clone().detach();
-    f_adve.index({Slice(), -1, 7}) = f_coll.index({Slice(), -1, 6}).clone().detach();
-    f_adve.index({Slice(), -1, 8}) = f_coll.index({Slice(), -1, 5}).clone().detach();
+    // No slip boundary conditions
+    f_adve.index({-1, Slice(), 4}) = f_coll.index({-1, Slice(), 2});
+    f_adve.index({-1, Slice(), 7}) = f_coll.index({-1, Slice(), 5});
+    f_adve.index({-1, Slice(), 8}) = f_coll.index({-1, Slice(), 6});
 
-    f_adve.index({Slice(), 0, 2}) = f_coll.index({Slice(), 0, 4}).clone().detach();
-    f_adve.index({Slice(), 0, 5}) = f_coll.index({Slice(), 0, 8}).clone().detach();
-    f_adve.index({Slice(), 0, 6}) = f_coll.index({Slice(), 0, 7}).clone().detach();
+    f_adve.index({0, Slice(), 2}) = f_coll.index({0, Slice(), 4});
+    f_adve.index({0, Slice(), 5}) = f_coll.index({0, Slice(), 7});
+    f_adve.index({0, Slice(), 6}) = f_coll.index({0, Slice(), 8});
+
   }
 
   // Save results
   print("saving results into files");
-  torch::save(ux, "sbt-ux.pt");
-  torch::save(uy, "sbt-uy.pt");
-  torch::save(fs, "sbt-fs.pt");
-  torch::save(rhos/3.0, "sbt-ps.pt");
+  torch::save(ux, "vpt-ux.pt");
+  torch::save(uy, "vpt-uy.pt");
+  torch::save(fs, "vpt-fs.pt");
+  torch::save(rhos/3.0, "vpt-ps.pt");
   return 0;
 }
-
