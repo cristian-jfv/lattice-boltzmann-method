@@ -49,3 +49,8 @@ set_property(TARGET specular_boundary_test PROPERTY CXX_STANDARD 17)
 target_link_libraries(specular_boundary_test
 		PRIVATE "${TORCH_LIBRARIES}" params solver domain utils)
 
+add_executable(gravity_test test/gravity_test.cpp)
+set_property(TARGET gravity_test PROPERTY CXX_STANDARD 17)
+target_link_libraries(gravity_test
+		PRIVATE "${TORCH_LIBRARIES}" solver utils)
+
