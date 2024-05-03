@@ -3,6 +3,20 @@ cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 project(LatticeBoltzmannMethod
 	VERSION 1.0)
 
+if(DEFINED ENV{Torch_DIR})
+message(STATUS "torch installation prefic=$ENV{Torch_DIR}")
+else()
+message(FATAL_ERROR "Torch_DIR not defined")
+endif()
+
+if(DEFINED ENV{TOMLCPP_DIR})
+message(STATUS "tomlcplusplus include directory=$ENV{TOMLCPP_DIR}")
+else()
+message(FATAL_ERROR "tomlcplusplus not defined")
+endif()
+
+include_directories("$ENV{TOMLCPP_DIR}")
+
 find_package(Torch REQUIRED)
 
 # Libraries
@@ -53,4 +67,9 @@ add_executable(gravity_test test/gravity_test.cpp)
 set_property(TARGET gravity_test PROPERTY CXX_STANDARD 17)
 target_link_libraries(gravity_test
 		PRIVATE "${TORCH_LIBRARIES}" solver utils)
+
+add_executable(cylinder_test test/cylinder_test.cpp)
+set_property(TARGET cylinder_test PROPERTY CXX_STANDARD 17)
+target_link_libraries(cylinder_test
+		PRIVATE "${TORCH_LIBRARIES}" params solver utils)
 

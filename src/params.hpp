@@ -1,42 +1,36 @@
 #ifndef PARAMS_HPP
 #define PARAMS_HPP
 #include <iostream>
-#include <cmath>
+#include <toml++/toml.hpp>
 
-struct dimensional_params
+namespace params
 {
-	double nu{1.0533e-6};
-	double c{343};
-	double U{0.001};
-	double L{0.01};
-	double rho_0{1.0};
-	double p_0{101325.0};
-	double t_0 = L/c;
-};
-
-std::ostream& operator<<(std::ostream& os, const dimensional_params& p);
-
-struct dimensionless_params
+struct flow
 {
-	double tau;
-	double Re;
-	double nu;
-	double dx;
-	int H,W;
-	dimensionless_params(const dimensional_params &p)
-	{
-		tau = 0.55;
-		Re = p.U*p.L/p.nu;
-		nu = p.nu/(p.c*p.L);
-		dx = 3.0*nu/(tau - 0.5);
-		H = ceil(p.L/dx);
-		W = ceil(p.L/dx);
-	}
+  double nu{0};
+  double u{0};
+  double l{0};
+  double rho_0{0};
+  double Re{0};
+  flow(const toml::table& tbl);
 };
 
-std::ostream& operator<<(std::ostream& os, const dimensionless_params& p);
+std::ostream& operator<<(std::ostream& os, const flow& p);
 
-struct lattice_units{
-
+struct lattice
+{
+  const double cs2{1.0/3.0};
+  double tau;
+  double Re;
+  double nu;
+  int l;
+  double dx;
+  double dt;
+  double u;
+  int Y,X;
+  lattice(const toml::table& tbl, const flow &fp);
 };
+
+std::ostream& operator<<(std::ostream& os, const lattice& p);
+}
 #endif
