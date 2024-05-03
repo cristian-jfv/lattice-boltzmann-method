@@ -7,6 +7,8 @@
 namespace utils
 {
 
+bool continue_execution();
+
 typedef std::initializer_list<at::indexing::TensorIndex> indices;
 
 void store_tensor(const torch::Tensor& source, torch::Tensor& target, int i);
