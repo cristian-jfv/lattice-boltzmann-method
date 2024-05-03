@@ -1,0 +1,12 @@
+[flow]
+initial_density = 1e3 # kg m^-3
+kinematic_viscosity = 1.0533E-6 # m^2 s^-1
+characteristic_length = 6.0E-3 # m
+characteristic_velocity = 0.5 # m s^-1
+
+[lattice]
+relaxation_time = 0.55
+lattice_spacing = 2.0E-5 # m
+# Multipliers are used when the domain is larger than the characteristic length
+x_multiplier = 9
+y_multiplier = 7
