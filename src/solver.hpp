@@ -6,7 +6,6 @@ namespace solver
 {
 
 void calc_rho(torch::Tensor& rho, const torch::Tensor& f);
-
 void calc_u(torch::Tensor& u, const torch::Tensor& f, const torch::Tensor& rho);
 void calc_incomp_u(torch::Tensor& u, const torch::Tensor& f);
 

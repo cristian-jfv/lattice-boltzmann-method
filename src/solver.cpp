@@ -1,6 +1,5 @@
 # include "solver.hpp"
-#include <c10/core/DefaultDtype.h>
-#include <iostream>
+#include <c10/core/DeviceType.h>
 
 namespace solver
 {
@@ -8,13 +7,18 @@ using torch::indexing::Slice;
 using torch::indexing::None;
 using torch::indexing::Ellipsis;
 
+const torch::Device device = torch::kCUDA;
+
 const torch::Tensor E = torch::tensor(
   {4.0/ 9.0,
     1.0/ 9.0, 1.0/ 9.0, 1.0/ 9.0, 1.0/ 9.0,
-    1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0}, torch::TensorOptions().dtype(torch::kDouble));
+    1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0},
+  torch::TensorOptions().dtype(torch::kDouble).device(device));
+
 const torch::Tensor c = torch::tensor(
   {{0.0, 1.0, 0.0, -1.0,  0.0,  1.0, -1.0, -1.0,  1.0},
-   {0.0, 0.0, 1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0}}, torch::TensorOptions().dtype(torch::kDouble));
+   {0.0, 0.0, 1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0}},
+  torch::TensorOptions().dtype(torch::kDouble).device(device));
 
 void calc_rho(torch::Tensor& rho, const torch::Tensor& f)
 {
