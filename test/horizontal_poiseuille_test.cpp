@@ -32,8 +32,8 @@ void periodic_boundary_condition
   const double rho_outlet
 )
 {
-  torch::Tensor temp_equi = torch::zeros({1, u.sizes()[1], 9});
-  torch::Tensor temp_rho = torch::ones({1, u.sizes()[1], 1});
+  torch::Tensor temp_equi = torch::zeros({1, u.sizes()[1], 9}, torch::kCUDA);
+  torch::Tensor temp_rho = torch::ones({1, u.sizes()[1], 1}, torch::kCUDA);
 
   // inlet
   solver::incomp_equilibrium(temp_equi, u.index(outlet).unsqueeze(0), rho_inlet*temp_rho);
@@ -68,12 +68,18 @@ int main()
 
   torch::set_default_dtype(caffe2::scalarTypeToTypeMeta(torch::kDouble));
   cout << "Default torch dtype: " << torch::get_default_dtype() << endl;
+  if (!torch::cuda::is_available())
+  {
+    std::cerr << "CUDA is NOT available\n";
+  }
+
+  const torch::Device dev = torch::kCUDA;
   // Tensors
-  Tensor f_equi = torch::zeros({H,W,9});
-  Tensor f_coll = torch::zeros_like(f_equi);
-  Tensor f_adve = torch::zeros_like(f_equi);
-  Tensor u = torch::zeros({H,W,2});
-  Tensor rho = torch::ones({H,W,1});
+  Tensor f_equi = torch::zeros({H,W,9}, dev);
+  Tensor f_coll = torch::zeros_like(f_equi, dev);
+  Tensor f_adve = torch::zeros_like(f_equi, dev);
+  Tensor u = torch::zeros({H,W,2}, dev);
+  Tensor rho = torch::ones({H,W,1}, dev);
 
   // Results
   Tensor fs = torch::zeros({H,W,9,T});
