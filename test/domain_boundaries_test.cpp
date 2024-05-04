@@ -14,9 +14,7 @@ int test_boundary_view();
 int main()
 {
   torch::manual_seed(33156); // reproducible results
-  int r = 0;
-  r = test_boundary_view();
-  assert(r==0);
+  assert(test_boundary_view()==0);
 
   return 0;
 }
