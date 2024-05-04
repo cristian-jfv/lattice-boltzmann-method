@@ -30,15 +30,15 @@ void periodic_boundary_condition
   const double rho_outlet
 )
 {
-  torch::Tensor temp_equi = torch::zeros({1, u.sizes()[1], 9});
-  torch::Tensor temp_rho = torch::ones({1, u.sizes()[1], 1});
+  torch::Tensor temp_equi = torch::zeros({1, u.sizes()[1], 9}, torch::kCUDA);
+  torch::Tensor temp_rho = torch::ones({1, u.sizes()[1], 1}, torch::kCUDA);
 
   // inlet
-  solver::incomp_equilibrium(temp_equi, u.index(outlet).unsqueeze(0), rho_inlet*temp_rho);
+  solver::equilibrium(temp_equi, u.index(outlet).unsqueeze(0), rho_inlet*temp_rho);
   f_coll.index(virtual_inlet) = (temp_equi + f_coll.index(outlet) - f_equi.index(outlet)).squeeze(0).clone().detach();
 
   // outlet
-  solver::incomp_equilibrium(temp_equi, u.index(inlet).unsqueeze(0), rho_outlet*temp_rho);
+  solver::equilibrium(temp_equi, u.index(inlet).unsqueeze(0), rho_outlet*temp_rho);
   f_coll.index(virtual_outlet) = (temp_equi + f_coll.index(inlet) - f_equi.index(inlet)).squeeze(0).clone().detach();
 }
 
@@ -66,11 +66,17 @@ int main()
 
   // Tensors
   torch::set_default_dtype(caffe2::scalarTypeToTypeMeta(torch::kDouble));
-  Tensor f_equi = torch::zeros({H,W,9});
-  Tensor f_coll = torch::zeros_like(f_equi);
-  Tensor f_adve = torch::zeros_like(f_equi);
-  Tensor u = torch::zeros({H,W,2});
-  Tensor rho = torch::ones({H,W,1});
+  if (!torch::cuda::is_available())
+  {
+    std::cerr << "CUDA is NOT available\n";
+  }
+  const torch::Device dev = torch::kCUDA;
+
+  Tensor f_equi = torch::zeros({H,W,9}, dev);
+  Tensor f_coll = torch::zeros_like(f_equi, dev);
+  Tensor f_adve = torch::zeros_like(f_equi, dev);
+  Tensor u = torch::zeros({H,W,2}, dev);
+  Tensor rho = torch::ones({H,W,1}, dev);
 
   // Results
   Tensor fs = torch::zeros({H,W,9,T});
@@ -98,10 +104,10 @@ int main()
     // Calculate macroscopic variables
     //print("calculate macroscopic variables");
     solver::calc_rho(rho, f_adve);
-    solver::calc_incomp_u(u, f_adve);
+    solver::calc_u(u, f_adve, rho);
     // Compute equilibrium
     //print("compute equilibrium");
-    solver::incomp_equilibrium(f_equi, u, rho);
+    solver::equilibrium(f_equi, u, rho);
     // Collision, BGK operator
     //print("collision step");
     solver::collision(f_coll, f_adve, f_equi, omega);
