@@ -19,6 +19,13 @@ include_directories("$ENV{TOMLCPP_DIR}")
 
 find_package(Torch REQUIRED)
 
+add_compile_options(
+       -Wall -Werror -Wno-error=maybe-uninitialized
+       $<$<CONFIG:RELEASE>:-Ofast>
+       $<$<CONFIG:DEBUG>:-O0>
+       $<$<CONFIG:DEBUG>:-ggdb3>
+)
+
 # Libraries
 add_library(params OBJECT src/params.cpp)
 target_include_directories(params ${warning_guard} PUBLIC
