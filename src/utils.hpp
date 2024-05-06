@@ -14,9 +14,9 @@ typedef std::initializer_list<at::indexing::TensorIndex> indices;
 void store_tensor(const torch::Tensor& source, torch::Tensor& target, int i);
 
 template<typename T>
-void print(const T& t, const char& end='\n')
+void print(const T& t)
 {
-  std::cout << t << end;
+  std::cout << t << "\n";
 }
 
 template<typename T>
