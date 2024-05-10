@@ -1,11 +1,12 @@
 #include <ATen/TensorIndexing.h>
 #include <iostream>
-#include <ostream>
+#include<ostream>
 #include <torch/torch.h>
 #include <toml++/toml.hpp>
 #include "../src/params.hpp"
 #include "../src/utils.hpp"
 #include "../src/solver.hpp"
+#include "../src/ibm.hpp"
 
 using torch::Tensor;
 using torch::indexing::Slice;
@@ -20,9 +21,11 @@ using solver::c;
 int main(int argc, char* argv[])
 {
   // Read parameters
-  toml::table tbl;
+  toml::table tbl; // flow and simulation params
+  toml::table tbl_boundary; // immersed boundary data
   try {
     tbl = toml::parse_file(argv[1]);
+    tbl_boundary = toml::parse_file(argv[2]);
   } catch (const toml::parse_error& err) {
     cerr << "Parsing failed:\n" << err << "\n";
     return 1;
@@ -34,7 +37,6 @@ int main(int argc, char* argv[])
   cout << lp << "\n";
   const params::simulation sp{tbl, lp};
   cout << sp << "\n";
-
 
   torch::set_default_dtype(caffe2::scalarTypeToTypeMeta(torch::kDouble));
   if (!torch::cuda::is_available())
@@ -55,24 +57,34 @@ int main(int argc, char* argv[])
   Tensor uy = torch::zeros_like(ux);
   Tensor rhos = torch::zeros_like(ux);
 
+  // Immersed boundary configuration
+  ibm ib{tbl_boundary, "cylinder-a", dev};
+  Tensor F, S;
+  const double ics2 = 1.0/3.0;
+  const double ics4 = 1.0/9.0;
+  Tensor equi_populations = torch::zeros_like(f_equi);
+
   // Parameters for the current study case
   const double p_grad = 8.0*lp.nu*lp.u/(lp.Y*lp.Y);
   const double rho_outlet = 1.0;
-  const double rho_inlet = 1.6; //3.0*(lp.X-1)*p_grad + rho_outlet;
+  const double rho_inlet = 1.5; //3.0*(lp.X-1)*p_grad + rho_outlet; //1.6;
+  utils::print("\nParameters for the current study case");
   utils::print("p_grad", p_grad);
   utils::print("rho_outlet", rho_outlet);
   utils::print("rho_inlet", rho_inlet);
   Tensor u_w = torch::zeros({lp.Y, 2}, dev);
   Tensor abb_bc = torch::zeros({lp.Y, 1}, dev);
+  cout << torch::ones({1,5});
 
-  if (argc < 3)
+  if (argc < 4)
     if(!utils::continue_execution()) return 0;
-  if (argc >= 3 && argv[2][0] == 'a')
+  if (argc >= 4 && argv[3][0] == 'a')
     return 0;
 
   // Initialization
   solver::incomp_equilibrium(f_adve, u, rho);
   int i{0};
+  cout << "\n";
   for (int t=0; t<sp.total_steps; t++)
   {
     if(sp.snapshot(t))
@@ -91,9 +103,23 @@ int main(int argc, char* argv[])
 
     // Compute equilibrium
     solver::incomp_equilibrium(f_equi, u, rho);
+    equi_populations.copy_(-lp.omega*( f_adve - f_equi ));
+
+    F = ib.eulerian_force_density(u, rho);
+
+    // Force source terms
+    auto u_roi = u.index({ib.rows, ib.cols, Slice()});
+    S = ((1-0.5*lp.omega)*((ics2 + ics4*u_roi.matmul(c))*F.matmul(c)
+      - ics2*(u_roi*F).sum(2).unsqueeze(2))
+      *E).clone().detach();
 
     // Collision, BGK operator
-    solver::collision(f_coll, f_adve, f_equi, lp.omega);
+    //print("collision step");
+    f_coll.copy_(
+      f_adve + equi_populations
+    );
+
+    f_coll.index({ib.rows, ib.cols, Slice()}) += S;
 
     // Advection
     solver::advect(f_adve, f_coll);

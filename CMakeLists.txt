@@ -43,6 +43,12 @@ target_link_libraries(domain "${TORCH_LIBRARIES}")
 target_include_directories(domain ${warning_guard} PUBLIC
 				"\$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src")
 
+add_library(ibm OBJECT src/ibm.cpp)
+set_property(TARGET ibm PROPERTY CXX_STANDARD 17)
+target_link_libraries(ibm "${TORCH_LIBRARIES}")
+target_include_directories(ibm ${warning_guard} PUBLIC
+				"\$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src")
+
 add_library(utils OBJECT src/utils.cpp)
 set_property(TARGET utils PROPERTY CXX_STANDARD 17)
 target_link_libraries(utils "${TORCH_LIBRARIES}")
@@ -78,5 +84,5 @@ target_link_libraries(gravity_test
 add_executable(cylinder_test test/cylinder_test.cpp)
 set_property(TARGET cylinder_test PROPERTY CXX_STANDARD 17)
 target_link_libraries(cylinder_test
-		PRIVATE "${TORCH_LIBRARIES}" params solver utils)
+		PRIVATE "${TORCH_LIBRARIES}" params solver utils ibm)
 
