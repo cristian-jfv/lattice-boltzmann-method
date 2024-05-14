@@ -86,3 +86,8 @@ set_property(TARGET cylinder_test PROPERTY CXX_STANDARD 17)
 target_link_libraries(cylinder_test
 		PRIVATE "${TORCH_LIBRARIES}" params solver utils ibm)
 
+add_executable(free_stream_test test/free_stream_test.cpp)
+set_property(TARGET free_stream_test PROPERTY CXX_STANDARD 17)
+target_link_libraries(free_stream_test
+		PRIVATE "${TORCH_LIBRARIES}" params solver utils ibm)
+

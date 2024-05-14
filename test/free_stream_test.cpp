@@ -48,6 +48,7 @@ int main(int argc, char* argv[])
   Tensor f_coll = torch::zeros_like(f_equi, dev);
   Tensor f_adve = torch::zeros_like(f_equi, dev);
   Tensor u = torch::zeros({lp.X, lp.Y, 2}, dev);
+  u.index({Ellipsis, 0}) = 0.1;
   Tensor rho = torch::ones({lp.X, lp.Y, 1}, dev);
 
   // Results
@@ -63,6 +64,7 @@ int main(int argc, char* argv[])
   utils::print("rho_outlet", rho_outlet);
   utils::print("rho_inlet", rho_inlet);
   Tensor u_w = torch::zeros({lp.Y, 2}, dev);
+  u_w.index({Slice(), 0}) = 0.1;
   Tensor abb_bc = torch::zeros({lp.Y, 1}, dev);
 
   if (argc < 3)
@@ -100,8 +102,8 @@ int main(int argc, char* argv[])
 
     // Anti-bounce-back boundary conditions
     // Inlet
-    u_w = (1.5*u.index({0, Ellipsis}) - 0.5*u.index({1, Ellipsis})).clone().detach();
-    abb_bc = ((2.0 + 9.0*torch::pow(u_w.matmul(c),2.0) - 3.0*u_w.mul(u_w).sum(1).unsqueeze(1))*E*rho_inlet).squeeze(0).clone().detach();
+    //u_w = (1.5*u.index({0, Ellipsis}) - 0.5*u.index({1, Ellipsis})).clone().detach();
+    abb_bc = ((2.0 + 9.0*torch::pow(u_w.matmul(c),2.0) - 3.0*u_w.mul(u_w).sum(1).unsqueeze(1))*E).squeeze(0).clone().detach();
     f_adve.index({0, Slice(), 3}) = (-f_coll.index({0, Slice(), 1}) + abb_bc.index({Slice(), 1})).clone().detach();
     f_adve.index({0, Slice(), 4}) = (-f_coll.index({0, Slice(), 2}) + abb_bc.index({Slice(), 2})).clone().detach();
     f_adve.index({0, Slice(), 1}) = (-f_coll.index({0, Slice(), 3}) + abb_bc.index({Slice(), 3})).clone().detach();
@@ -111,7 +113,7 @@ int main(int argc, char* argv[])
     f_adve.index({0, Slice(), 5}) = (-f_coll.index({0, Slice(), 7}) + abb_bc.index({Slice(), 7})).clone().detach();
     f_adve.index({0, Slice(), 6}) = (-f_coll.index({0, Slice(), 8}) + abb_bc.index({Slice(), 8})).clone().detach();
     // Outlet
-    u_w = (1.5*u.index({-1, Ellipsis}) - 0.5*u.index({-2, Ellipsis})).clone().detach();
+    //u_w = (1.5*u.index({-1, Ellipsis}) - 0.5*u.index({-2, Ellipsis})).clone().detach();
     abb_bc = ((2.0 + 9.0*torch::pow(u_w.matmul(c),2.0) - 3.0*u_w.mul(u_w).sum(1).unsqueeze(1))*E).squeeze(0).clone().detach();
     f_adve.index({-1, Slice(), 3}) = (-f_coll.index({-1, Slice(), 1}) + abb_bc.index({Slice(), 1})).clone().detach();
     f_adve.index({-1, Slice(), 4}) = (-f_coll.index({-1, Slice(), 2}) + abb_bc.index({Slice(), 2})).clone().detach();
@@ -131,12 +133,13 @@ int main(int argc, char* argv[])
     f_adve.index({Slice(), 0, 5}) = f_coll.index({Slice(), 0, 8}).clone().detach();
     f_adve.index({Slice(), 0, 6}) = f_coll.index({Slice(), 0, 7}).clone().detach();
   }
+  utils::print("u_w", u_w);
 
   // Save results
   utils::print("\nSaving results");
-  torch::save(ux, sp.file_prefix + "ct-ux.pt");
-  torch::save(uy, sp.file_prefix + "ct-uy.pt");
-  torch::save(rhos/3.0, sp.file_prefix + "ct-ps.pt");
-
+  torch::save(ux, sp.file_prefix + "fst-ux.pt");
+  torch::save(uy, sp.file_prefix + "fst-uy.pt");
+  torch::save(rhos/3.0, sp.file_prefix + "fst-ps.pt");
+  cout << "\a" << std::endl;
   return 0;
 }
