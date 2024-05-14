@@ -67,12 +67,14 @@ int main(int argc, char* argv[])
   // Parameters for the current study case
   const double p_grad = 8.0*lp.nu*lp.u/(lp.Y*lp.Y);
   const double rho_outlet = 1.0;
-  const double rho_inlet = 1.5; //3.0*(lp.X-1)*p_grad + rho_outlet; //1.6;
+  const double rho_inlet = 1.6; //3.0*(lp.X-1)*p_grad + rho_outlet; //1.6;
   utils::print("\nParameters for the current study case");
   utils::print("p_grad", p_grad);
   utils::print("rho_outlet", rho_outlet);
   utils::print("rho_inlet", rho_inlet);
   Tensor u_w = torch::zeros({lp.Y, 2}, dev);
+  u_w.index({Slice(), 0}) = lp.u;
+  u.index({Ellipsis, 0}) = lp.u;
   Tensor abb_bc = torch::zeros({lp.Y, 1}, dev);
   cout << torch::ones({1,5});
 
@@ -99,10 +101,10 @@ int main(int argc, char* argv[])
 
     // Calculate macroscopic variables
     solver::calc_rho(rho, f_adve);
-    solver::calc_incomp_u(u, f_adve);
+    solver::calc_u(u, f_adve, rho);
 
     // Compute equilibrium
-    solver::incomp_equilibrium(f_equi, u, rho);
+    solver::equilibrium(f_equi, u, rho);
     equi_populations.copy_(-lp.omega*( f_adve - f_equi ));
 
     F = ib.eulerian_force_density(u, rho);
@@ -126,8 +128,8 @@ int main(int argc, char* argv[])
 
     // Anti-bounce-back boundary conditions
     // Inlet
-    u_w = (1.5*u.index({0, Ellipsis}) - 0.5*u.index({1, Ellipsis})).clone().detach();
-    abb_bc = ((2.0 + 9.0*torch::pow(u_w.matmul(c),2.0) - 3.0*u_w.mul(u_w).sum(1).unsqueeze(1))*E*rho_inlet).squeeze(0).clone().detach();
+    //u_w = (1.5*u.index({0, Ellipsis}) - 0.5*u.index({1, Ellipsis})).clone().detach();
+    abb_bc = ((2.0 + 9.0*torch::pow(u_w.matmul(c),2.0) - 3.0*u_w.mul(u_w).sum(1).unsqueeze(1))*E).squeeze(0).clone().detach();
     f_adve.index({0, Slice(), 3}) = (-f_coll.index({0, Slice(), 1}) + abb_bc.index({Slice(), 1})).clone().detach();
     f_adve.index({0, Slice(), 4}) = (-f_coll.index({0, Slice(), 2}) + abb_bc.index({Slice(), 2})).clone().detach();
     f_adve.index({0, Slice(), 1}) = (-f_coll.index({0, Slice(), 3}) + abb_bc.index({Slice(), 3})).clone().detach();
@@ -137,7 +139,7 @@ int main(int argc, char* argv[])
     f_adve.index({0, Slice(), 5}) = (-f_coll.index({0, Slice(), 7}) + abb_bc.index({Slice(), 7})).clone().detach();
     f_adve.index({0, Slice(), 6}) = (-f_coll.index({0, Slice(), 8}) + abb_bc.index({Slice(), 8})).clone().detach();
     // Outlet
-    u_w = (1.5*u.index({-1, Ellipsis}) - 0.5*u.index({-2, Ellipsis})).clone().detach();
+    //u_w = (1.5*u.index({-1, Ellipsis}) - 0.5*u.index({-2, Ellipsis})).clone().detach();
     abb_bc = ((2.0 + 9.0*torch::pow(u_w.matmul(c),2.0) - 3.0*u_w.mul(u_w).sum(1).unsqueeze(1))*E).squeeze(0).clone().detach();
     f_adve.index({-1, Slice(), 3}) = (-f_coll.index({-1, Slice(), 1}) + abb_bc.index({Slice(), 1})).clone().detach();
     f_adve.index({-1, Slice(), 4}) = (-f_coll.index({-1, Slice(), 2}) + abb_bc.index({Slice(), 2})).clone().detach();

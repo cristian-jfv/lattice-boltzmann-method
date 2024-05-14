@@ -171,7 +171,10 @@ torch::Tensor ibm::eulerian_force_density(const torch::Tensor& u_0, const torch:
       auto box = u.index({m.rows, m.cols, Ellipsis}).clone().detach().reshape({16,2});
       // Interpolate u(x) at r_j
       uj.index({Slice(), i}) = m.phi.matmul(box).clone().detach();
-      fj.index({Slice(), i}) = -2.0*uj.index({Slice(), i}).clone().detach();
+      //utils::print("phi", m.phi);
+      auto rhoj = m.phi.matmul(rho.index({m.rows, m.cols, Ellipsis}).reshape({16,1}));
+      //utils::print("rhoj", rhoj);
+      fj.index({Slice(), i}) = -2.0*rhoj*uj.index({Slice(), i}).clone().detach();
 
       // This implements deltaF for each marker
       F.index({m.rows, m.cols, Slice(), n}) +=
