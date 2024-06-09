@@ -85,7 +85,7 @@ std::ostream& params::operator<<(std::ostream& os, const params::lattice& p)
    << "l=" << p.l << "\n"
    << "nu=" << p.nu << "\n"
    << "u=" << p.u << "\n"
-   << "dt=" << p.dt << "\n"
+   << "dt=" << p.dt << "s\n"
    << "T=" << p.T << "\n"
    << "X=" << p.X << "\n"
    << "Y=" << p.Y << std::endl;

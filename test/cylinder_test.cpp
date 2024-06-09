@@ -56,22 +56,20 @@ int main(int argc, char* argv[])
   Tensor ux = torch::zeros({lp.X, lp.Y, sp.total_snapshots});
   Tensor uy = torch::zeros_like(ux);
   Tensor rhos = torch::zeros_like(ux);
+  Tensor surf_forces = torch::zeros({2, sp.total_snapshots});
 
   // Immersed boundary configuration
   ibm ib{tbl_boundary, "cylinder-a", dev};
-  Tensor F, S;
+  Tensor F = torch::zeros({45, 44, 2});
+  Tensor S;
+  Tensor F_s = torch::zeros({2});
   const double ics2 = 1.0/3.0;
   const double ics4 = 1.0/9.0;
   Tensor equi_populations = torch::zeros_like(f_equi);
+  Tensor forces = torch::zeros({45, 44, 2, sp.total_snapshots});
 
   // Parameters for the current study case
-  const double p_grad = 8.0*lp.nu*lp.u/(lp.Y*lp.Y);
-  const double rho_outlet = 1.0;
-  const double rho_inlet = 1.6; //3.0*(lp.X-1)*p_grad + rho_outlet; //1.6;
   utils::print("\nParameters for the current study case");
-  utils::print("p_grad", p_grad);
-  utils::print("rho_outlet", rho_outlet);
-  utils::print("rho_inlet", rho_inlet);
   Tensor u_w = torch::zeros({lp.Y, 2}, dev);
   u_w.index({Slice(), 0}) = lp.u;
   u.index({Ellipsis, 0}) = lp.u;
@@ -96,6 +94,8 @@ int main(int argc, char* argv[])
       ux.index({Ellipsis,i}) = u.index({Ellipsis, 0}).clone().detach();
       uy.index({Ellipsis,i}) = u.index({Ellipsis, 1}).clone().detach();
       rhos.index({Ellipsis,i}) = rho.squeeze(2).clone().detach();
+      surf_forces.index({Ellipsis,i}) = F_s.clone().detach();
+      forces.index({Ellipsis,i}) = F.clone().detach();
       ++i;
     }
 
@@ -108,6 +108,9 @@ int main(int argc, char* argv[])
     equi_populations.copy_(-lp.omega*( f_adve - f_equi ));
 
     F = ib.eulerian_force_density(u, rho);
+    // Calculate surface force over for the cylinder
+    F_s = F.reshape({F.sizes()[0]*F.sizes()[1], 2}).sum(0);
+
 
     // Force source terms
     auto u_roi = u.index({ib.rows, ib.cols, Slice()});
@@ -165,6 +168,8 @@ int main(int argc, char* argv[])
   torch::save(ux, sp.file_prefix + "ct-ux.pt");
   torch::save(uy, sp.file_prefix + "ct-uy.pt");
   torch::save(rhos/3.0, sp.file_prefix + "ct-ps.pt");
+  torch::save(surf_forces, sp.file_prefix + "ct-Fs.pt");
+  torch::save(forces, sp.file_prefix + "ct-F.pt");
 
   return 0;
 }

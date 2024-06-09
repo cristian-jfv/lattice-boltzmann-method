@@ -1,7 +1,6 @@
 #ifndef IBM_HPP
 #define IBM_HPP
 
-#include <array>
 #include <torch/torch.h>
 #include <vector>
 

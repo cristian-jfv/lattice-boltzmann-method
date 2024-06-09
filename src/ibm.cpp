@@ -93,9 +93,9 @@ m_max{m_max}
     else throw std::runtime_error("Cannot parse y coordinate");
 
     // Track region of interest (ROI)
-    if (r_min > (int)(std::floor(x_m) - 1)) r_min = (int)(std::floor(x_m) - 1);
+    if (r_min > (int)(std::floor(x_m) - 2)) r_min = (int)(std::floor(x_m) - 2);
     if (r_max < (int)(std::floor(x_m) + 2)) r_max = (int)(std::floor(x_m) + 2);
-    if (c_min > (int)(std::floor(y_m) - 1)) c_min = (int)(std::floor(y_m) - 1);
+    if (c_min > (int)(std::floor(y_m) - 2)) c_min = (int)(std::floor(y_m) - 2);
     if (c_max < (int)(std::floor(y_m) + 2)) c_max = (int)(std::floor(y_m) + 2);
 
     markers.push_back(marker(x_m - r_off , y_m - c_off));
@@ -144,9 +144,9 @@ torch::indexing::Slice ibm::get_roi
     else throw std::runtime_error("Cannot parse y coordinate");
 
     // Track region of interest (ROI)
-    if (r_min > (int)(std::floor(x_m) - 1)) r_min = (int)(std::floor(x_m) - 1);
+    if (r_min > (int)(std::floor(x_m) - 2)) r_min = (int)(std::floor(x_m) - 2);
     if (r_max < (int)(std::floor(x_m) + 2)) r_max = (int)(std::floor(x_m) + 2);
-    if (c_min > (int)(std::floor(y_m) - 1)) c_min = (int)(std::floor(y_m) - 1);
+    if (c_min > (int)(std::floor(y_m) - 2)) c_min = (int)(std::floor(y_m) - 2);
     if (c_max < (int)(std::floor(y_m) + 2)) c_max = (int)(std::floor(y_m) + 2);
   }
   if (type=='r') return Slice(r_min, r_max + 1);

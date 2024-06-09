@@ -55,7 +55,7 @@ int main()
   const double tau = std::sqrt(3.0/16.0) + 0.5;
   const double omega = 1.0/tau;
   cout << "omega=" << omega << endl;
-  const double u_max = 0.1;
+  const double u_max = 1.030985714E-1; //0.1;
   const double nu = (2.0 * tau -1.0)/6.0;
   cout << "nu=" << nu << endl;
   const double Re = W*u_max/nu;
