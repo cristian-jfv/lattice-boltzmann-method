@@ -17,15 +17,99 @@ const torch::Tensor E = torch::tensor(
 
 const torch::Tensor E_E = (E*E).sum_to_size({1,9}).clone().detach();
 
-void equilibrium
+const torch::Tensor M_original = torch::tensor(
+  {{ 1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0},
+   {-4.0, -1.0, -1.0, -1.0, -1.0,  2.0,  2.0,  2.0,  2.0},
+   { 4.0, -2.0, -2.0, -2.0, -2.0,  1.0,  1.0,  1.0,  1.0},
+   { 0.0,  1.0,  0.0, -1.0,  0.0,  1.0, -1.0, -1.0,  1.0},
+   { 0.0, -2.0,  0.0,  2.0,  0.0,  1.0, -1.0, -1.0,  1.0},
+   { 0.0,  0.0,  1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0},
+   { 0.0,  0.0, -2.0,  0.0,  2.0,  1.0,  1.0, -1.0, -1.0},
+   { 0.0,  1.0, -1.0,  1.0, -1.0,  0.0,  0.0,  0.0,  0.0},
+   { 0.0,  0.0,  0.0,  0.0,  0.0,  1.0, -1.0,  1.0, -1.0}},
+  torch::TensorOptions().dtype(torch::kDouble).device(torch::kCUDA));
+// Use the tranpose to enable matrix multiplication latter on
+const torch::Tensor M = M_original.t().clone().detach();
+const torch::Tensor M_inv = M_original.inverse().t().clone().detach();
+
+void phase_field
 (
-  torch::Tensor &f_equ,
-  const torch::Tensor &u,
-  const torch::Tensor &rho,
-  const torch::Tensor &phi,
-  const torch::Tensor &equ_factor,
-  const double cs
+  torch::Tensor &rho_n,
+  const torch::Tensor &r_rho,
+  double r_rho_0,
+  const torch::Tensor &b_rho,
+  double b_rho_0
 );
+
+struct relaxation_function
+{
+private:
+  const double delta;
+  const double r_s_nu;
+  const double b_s_nu;
+  const double beta, gamma, epsilon, eta, xi;
+
+  double init_s_nu(double nu, double cs2)
+  { return 1.0/( 0.5 + nu/cs2 ); }
+
+  double init_beta(double r_s_nu, double b_s_nu)
+  { return 2.0*r_s_nu*b_s_nu/(r_s_nu + b_s_nu); }
+
+  double init_gamma(double r_s_nu, double beta, double delta)
+  { return 2.0*(r_s_nu - beta)/delta; }
+
+  double init_epsilon(double gamma, double delta)
+  { return -gamma/(2.0*delta); }
+
+  double init_eta(double b_s_nu, double beta, double delta)
+  { return 2.0*(beta - b_s_nu)/delta; }
+
+  double init_xi(double eta, double delta)
+  { return eta/(2.0*delta); }
+
+  double eval(double psi) // Scalar function to evaluate the relaxation parameter
+  {
+    if (psi > delta) return r_s_nu;
+    else if (delta >= psi && psi > 0) return beta + gamma*psi + epsilon*psi*psi;
+    else if (0 >= psi && psi >= -delta) return beta + eta*psi + xi*psi*psi;
+    return b_s_nu;
+  }
+
+public:
+  relaxation_function(double r_nu, double r_cs2, double b_nu, double b_cs2, double delta):
+  delta{delta},
+  r_s_nu{init_s_nu(r_nu, r_cs2)},
+  b_s_nu{init_s_nu(b_nu, b_cs2)},
+  beta{init_beta(r_s_nu, b_s_nu)},
+  gamma{init_gamma(r_s_nu, beta, delta)},
+  epsilon{init_epsilon(gamma, delta)},
+  eta{init_eta(b_s_nu, beta, delta)},
+  xi{init_xi(eta, delta)}
+  {
+    // k_nu: kinematic viscosity
+    // k_cs2: squared numeric sound speed
+  }
+
+  void eval(torch::Tensor &s_nu, const torch::Tensor &psi)
+  {
+    auto mask = (psi > delta).to(torch::kDouble);
+    auto elements = mask*r_s_nu;
+    s_nu.masked_fill_(mask.to(torch::kBool), elements);
+
+    mask.copy_( (delta >= psi) * (psi > 0) ).to(torch::kDouble);
+    elements.copy_(mask*(beta + gamma*psi + epsilon*psi*psi));
+    s_nu.masked_fill_(mask.to(torch::kBool), elements);
+
+    mask.copy_( (0 >= psi) * (psi >= -delta) ).to(torch::kDouble);
+    elements.copy_(mask*(beta + eta*psi + xi*psi*psi));
+    s_nu.masked_fill_(mask.to(torch::kBool), elements);
+
+    mask.copy_( psi < -delta ).to(torch::kDouble);
+    elements.copy_(mask*b_s_nu);
+    s_nu.masked_fill_(mask.to(torch::kBool), elements);
+  }
+
+};
 
 class color
 {
@@ -33,15 +117,14 @@ public:
   torch::Tensor rho;
   torch::Tensor f;
   torch::Tensor f_equ;
-  const torch::Tensor equ_factor;
   const double alpha;
   const double cs2;
+  const double nu;
 
-  color(int L, double R, double rho_0, double alpha, bool invert_sigmoid=false):
-  equ_factor{init_equ_factor(alpha)},
+  color(int L, double R, double rho_0, double alpha, double nu, bool invert_sigmoid=false):
   alpha{alpha},
   cs2{init_cs2(alpha)},
-  phi{init_phi(alpha)}
+  nu{nu}
   {
     rho = torch::zeros({L, L, 1}, torch::kCUDA);
     init_rho(rho, rho_0, L, R, invert_sigmoid);
@@ -49,30 +132,11 @@ public:
     f_equ = torch::zeros_like(f);
   }
 
-  void equilibrium
-  (
-    const torch::Tensor &u
-  )
-  {
-    torch::Tensor u_u = (u*u).sum_to_size(rho.sizes());
-    torch::Tensor E_u = torch::matmul(u, E);
-    f_equ = (rho*(phi + torch::mul(3.0*E_u*equ_factor + 4.5*E_u.pow(2) - 1.5*u_u, W))).clone().detach();
-  }
-
 private:
-  const torch::Tensor phi;
 
-  torch::Tensor init_equ_factor(double alpha)
+  void mrt_operator(torch::Tensor &f, const torch::Tensor &rho, const torch::Tensor &u)
   {
-    const double cs2 = init_cs2(alpha);
-    return (1.0 + 0.5*(3.0*cs2 - 1.0)*(3.0*E_E-4.0)).clone().detach();
-  }
-
-  torch::Tensor init_phi(double alpha)
-  {
-    const double a = 0.2*(1-alpha);
-    const double b = 0.05*(1-alpha);
-    return torch::tensor({alpha, a, a, a, a, b, b, b, b}, torch::kCUDA);
+    
   }
 
   void init_rho(torch::Tensor &rho, double rho_0, double L, double R, bool invert)
@@ -113,12 +177,11 @@ int main(int argc, char *argv[])
   // Parameters
   const int L = 100; // Domain size
   const double R = 25.0; // Droplet radius
-  const double r_rho_0 = 10.0;
-  const double b_rho_0 = 1.0;
 
   // Initialization
-  color r{L, R, r_rho_0, 0.92, true};
-  color b{L, R, b_rho_0, 0.2};
+  color r{L, R, /*rho_0=*/10.0, /*alpha=*/0.92, /*nu=*/0.1667, true};
+  color b{L, R, /*rho_0=*/ 1.0, /*alpha=*/0.2,  /*nu=*/0.1667};
+  relaxation_function s_nu{r.nu, r.cs2, b.nu, b.cs2, /*delta=*/0.1};
   Tensor u = torch::zeros({L, L, 2}, dev);
 
   // Main loop
@@ -130,8 +193,7 @@ int main(int argc, char *argv[])
     }
 
     // Compute equilibrium distributions
-    r.equilibrium(u);
-    b.equilibrium(u);
+
 
     // Compute BGK operator
     // Compute perturbation operator
@@ -146,4 +208,16 @@ int main(int argc, char *argv[])
   return 0;
 }
 
-
+void eval_phase_field
+(
+  torch::Tensor &rho_n,
+  const torch::Tensor &r_rho,
+  double r_rho_0,
+  const torch::Tensor &b_rho,
+  double b_rho_0
+)
+{
+  rho_n = ((r_rho/r_rho_0 - b_rho/b_rho_0)
+          /
+          (r_rho/r_rho_0 + b_rho/b_rho_0)).clone().detach();
+}
