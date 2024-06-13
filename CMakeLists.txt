@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 
 project(LatticeBoltzmannMethod
 	VERSION 1.0)
@@ -90,4 +90,9 @@ add_executable(free_stream_test test/free_stream_test.cpp)
 set_property(TARGET free_stream_test PROPERTY CXX_STANDARD 17)
 target_link_libraries(free_stream_test
 		PRIVATE "${TORCH_LIBRARIES}" params solver utils ibm)
+
+add_executable(static_droplet_test test/static_droplet_test.cpp)
+set_property(TARGET static_droplet_test PROPERTY CXX_STANDARD 17)
+target_link_libraries(static_droplet_test
+		PRIVATE "${TORCH_LIBRARIES}")
 
