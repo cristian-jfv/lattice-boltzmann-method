@@ -94,5 +94,5 @@ target_link_libraries(free_stream_test
 add_executable(static_droplet_test test/static_droplet_test.cpp)
 set_property(TARGET static_droplet_test PROPERTY CXX_STANDARD 17)
 target_link_libraries(static_droplet_test
-		PRIVATE "${TORCH_LIBRARIES}")
+		PRIVATE "${TORCH_LIBRARIES}" solver utils)
 
