@@ -1,4 +1,6 @@
 #include <iostream>
+#include <torch/nn/functional/normalization.h>
+#include <torch/nn/options/normalization.h>
 #include <torch/torch.h>
 
 #include "../src/solver.hpp"
@@ -9,6 +11,7 @@
 using torch::Tensor;
 using torch::indexing::Ellipsis;
 using torch::indexing::Slice;
+namespace tnnf = torch::nn::functional;
 
 using std::cout;
 using std::endl;
@@ -35,9 +38,72 @@ const Tensor E = torch::tensor(
 
 const Tensor E_rep = E.unsqueeze(0).unsqueeze(0).repeat({L,L,1,1}).clone().detach();
 
+class partial_derivatives
+{
+private:
+// Kernels for partial derivatives
+const Tensor kernel_partial_x = 3.0*torch::tensor(
+  {{-1.0/36.0, 0.0, 1.0/36.0},
+   { -1.0/9.0, 0.0,  1.0/9.0},
+   {-1.0/36.0, 0.0, 1.0/36.0}},
+  torch::TensorOptions().dtype(torch::kDouble).device(torch::kCUDA));
+
+const Tensor kernel_partial_y = -3.0*torch::tensor(
+  {{ 1.0/36.0,  1.0/9.0,  1.0/36.0},
+   {      0.0,      0.0,       0.0},
+   {-1.0/36.0, -1.0/9.0, -1.0/36.0}},
+  torch::TensorOptions().dtype(torch::kDouble).device(torch::kCUDA));
+
+torch::nn::Conv2d initialize_convolution(const Tensor &kernel)
+{
+  auto conv_options = torch::nn::Conv2dOptions(
+    /*in_channels=*/1, /*out_channels=*/1, /*kernel_size=*/3)
+                               .padding({1,1})
+                               .padding_mode(torch::kReplicate)
+                               .bias(false);
+
+  torch::nn::Conv2d ans(conv_options);
+  ans->weight = kernel.reshape({1, 1, 3, 3}).clone().detach();
+  ans->bias = torch::tensor({0.0},torch::TensorOptions().dtype(torch::kDouble).device(torch::kCUDA));
+  return ans;
+}
+
+// Convolution operators for partial derivatives
+torch::nn::Conv2d partial_x = nullptr;
+torch::nn::Conv2d partial_y = nullptr;
+
+public:
+  partial_derivatives()
+  {
+    partial_x = initialize_convolution(kernel_partial_x);
+    partial_y = initialize_convolution(kernel_partial_y);
+  }
+
+  Tensor x(const Tensor &psi)
+  {
+    return partial_x->forward(psi.unsqueeze(0).unsqueeze(0).squeeze(-1))
+    .squeeze(0).squeeze(0).clone().detach();
+  }
+
+  Tensor y(const Tensor &psi)
+  {
+    return partial_y->forward(psi.unsqueeze(0).unsqueeze(0).squeeze(-1))
+    .squeeze(0).squeeze(0).clone().detach();
+  }
+
+  void grad(Tensor &ans, const Tensor &psi)
+  {
+    ans.index({Ellipsis,0}) = x(psi);
+    ans.index({Ellipsis,1}) = y(psi);
+  }
+
+};
+partial_derivatives partial{};
+
 class colour
 {
 public:
+  const double rho_0;
   const double alpha;
   const double A;
   const double omega;
@@ -56,7 +122,8 @@ public:
   Tensor adv_f; // Stores the dist. funciton after the advection step
   Tensor rho;
 
-  colour(int R, int C, double alpha, double A, double nu, double beta):
+  colour(int R, int C, double rho_0, double alpha, double A, double nu, double beta):
+  rho_0{rho_0},
   alpha{alpha},
   A{A},
   omega{init_omega(nu)},
@@ -72,10 +139,10 @@ public:
     omega1 = torch::zeros_like(adv_f);
     omega2 = torch::zeros_like(adv_f);
     omega3 = torch::zeros_like(adv_f);
-    rho = torch::zeros({R,C,1}, dev);
+    rho = torch::zeros({R,C}, dev);
   }
 
-  void collision_step
+  void step
   (
     const Tensor &u,
     const Tensor &relax_params,
@@ -116,16 +183,20 @@ private:
     eval_omega1(omega1, rho, u);
     eval_omega2(omega2, relax_params, eta);
     Tensor rho_ratio = rho/rho_mix;
+
+    // Tensor A = rho_ratio.unsqueeze(-1)*(omega1 + omega2);
+
     omega.copy_(
       // beta must be initialised with the appropiate sign
-      rho_ratio*(omega1 + omega2) + beta*kappa
+      rho_ratio.unsqueeze(-1)*(omega1 + omega2) + beta*kappa
     );
   }
 
   void eval_omega2(Tensor &omega, const Tensor &relax_params, const Tensor &eta)
   {
+    // Tensor B = 1.0 - 0.5*relax_params.unsqueeze(-1);
     omega.copy_(
-      A*(1.0 - 0.5*relax_params)*eta
+      A*(1.0 - 0.5*relax_params.unsqueeze(-1))*eta
     );
   }
 
@@ -141,9 +212,18 @@ private:
   void eval_equilibrium(Tensor &omega, const Tensor &rho_, const Tensor &u)
   {
     Tensor E_u = torch::matmul(u,E);
-    Tensor u_u = (u*u).sum(2);
+    Tensor u_u = (u*u).sum(2).unsqueeze(-1);
+
+    // Tensor A = ics2*E_u*xi;
+    // Tensor B = 0.5*ics2*ics2*E_u.pow(2);
+    // Tensor C = 0.5*ics2*u_u;
+    // Tensor D = torch::mul(A + B - C, W);
+
     omega.copy_(
-      rho_*(phi + torch::mul(ics2*E_u*xi + 0.5*ics2*ics2*E_u.pow(2) - 0.5*ics2*u_u, W))
+      rho_.unsqueeze(-1)*(
+        phi
+        + torch::mul(ics2*E_u*xi + 0.5*ics2*ics2*E_u.pow(2) - 0.5*ics2*u_u, W)
+      )
     );
   }
 
@@ -244,14 +324,40 @@ public:
   }
 };
 
+double sigmoid(double x) { return 1.0/(1.0 + std::exp(-x)); }
+
+void init_rho(torch::Tensor &rho, double rho_0, double L_, double R, bool invert)
+{
+  int rows = rho.size(0);
+  int cols = rho.size(1);
+  double C = L_/2.0;
+
+  for(int r=0; r<rows; r++)
+  {
+    for(int c=0; c<cols; c++)
+    {
+      double s = std::sqrt((r-C)*(r-C) + (c-C)*(c-C));
+      double ans = 0.0;
+      if(invert) ans = 1.0 - sigmoid(2.0*(s-R));
+      else ans = sigmoid(2.0*(s-R));
+      rho[r][c] = rho_0*ans;
+    }
+  }
+}
+
 void eval_eta(Tensor &eta, const Tensor &u, const Tensor &Fs)
 {
   // eta is defined as the color independent part of the perturbation operator
   Tensor E_u = torch::matmul(u,E);
   // TODO: define factor for the second term in the expression
+  // Tensor A = ics2*(E_rep - u.unsqueeze(-1));
+  // Tensor B = ics2*(E_u.unsqueeze(-2)*E);
+  // Tensor C = A+B;
+  // Tensor D = ((A+B)*Fs.unsqueeze(-1)).sum(2);
+
   eta.copy_(
     torch::mul(
-    (ics2*(E_rep - u.unsqueeze(-1)) + ics2*(E_u.unsqueeze(-2)*E))*Fs.unsqueeze(-1).sum(2)
+    ((ics2*(E_rep - u.unsqueeze(-1)) + ics2*(E_u.unsqueeze(-2)*E))*Fs.unsqueeze(-1)).sum(2)
     , W)
   );
 }
@@ -267,47 +373,115 @@ void eval_kappa
   const Tensor &b_phi
 )
 {
+  // Tensor A = (r_rho*b_rho/rho.pow(2)).unsqueeze(-1);
+  // Tensor B = (r_rho.unsqueeze(-1)*r_phi + b_rho.unsqueeze(-1)*b_phi).squeeze(-1);
+  // Tensor C = torch::matmul(n,E)*B;
+  // Tensor D = A*C;
+
   kappa.copy_(
-    (r_rho*b_rho/rho.pow(2)) * torch::matmul(n,E)*(r_rho*r_phi + b_rho*b_phi)
+    (r_rho*b_rho/rho.pow(2)).unsqueeze(-1) * torch::matmul(n,E)*(r_rho.unsqueeze(-1)*r_phi + b_rho.unsqueeze(-1)*b_phi).squeeze(-1)
   );
+}
+
+void eval_local_curvature(Tensor &K, const Tensor &n)
+{
+  #define nx n.index({Ellipsis,0})
+  #define ny n.index({Ellipsis,1})
+  K = (nx*ny*(partial.y(nx) + partial.x(ny))
+      - nx.pow(2.0)*partial.y(ny) - ny.pow(2.0)*partial.x(nx))
+    .unsqueeze(-1).clone().detach();
 }
 
 void eval_phase_field
 (
-  Tensor &psi,
-  const Tensor &r_rho,
-  const Tensor &b_rho
-);
+  torch::Tensor &rho_n,
+  const torch::Tensor &r_rho,
+  double r_rho_0,
+  const torch::Tensor &b_rho,
+  double b_rho_0
+)
+{
+  rho_n = ((r_rho/r_rho_0 - b_rho/b_rho_0)
+          /
+          (r_rho/r_rho_0 + b_rho/b_rho_0)).clone().detach();
+}
 
-void eval_K
-(
-  Tensor &K,
-  const Tensor &n
-);
+std::ostream& operator<<(std::ostream& os, const colour& c)
+{
+    return os << " color parameters" << "\n"
+    << "alpha=" << c.alpha << "\n"
+    << "cks2=" << c.cks2 << "\n"
+    //<< "nu=" << c.nu << "\n"
+    << "rho_0=" << c.rho_0 << "\n"
+    << "omega=" << c.omega << "\n"
+    << "A=" << c.A << "\n"
+    << "beta=" << c.beta << endl;
+}
 
 int main()
 {
+  torch::set_default_dtype(caffe2::scalarTypeToTypeMeta(torch::kDouble));
+  if (!torch::cuda::is_available())
+  {
+    std::cerr << "CUDA is NOT available\n";
+  }
+
   // Macroscopic parameters
   Tensor u = torch::zeros({L,L,2}, dev);
   Tensor rho_mix = torch::zeros({L,L}, dev);
 
+  // Colour-independet quantities
   Tensor eta = torch::zeros({L,L,9}, dev);
   Tensor kappa = torch::zeros({L,L,9}, dev);
+  Tensor relax_params = torch::zeros({L,L},dev);
 
+  // Interfacial tension
+  const double sigma = 0.1;
   Tensor phase_field = torch::zeros({L,L}, dev);
   Tensor grad_pf = torch::zeros({L,L,2}, dev);
   Tensor K = torch::zeros({L,L}, dev);
   Tensor n = torch::zeros({L,L,2}, dev);
   Tensor Fs = torch::zeros({L,L,2}, dev);
 
-  colour r{/*R=*/L, /*C=*/L, /*alpha=*/0.2, /*A=*/0.5, /*nu=*/0.1667, /*beta=*/0.7};
-  colour b{/*R=*/L, /*C=*/L, /*alpha=*/0.2, /*A=*/0.5, /*nu=*/0.1667, /*beta=*/-0.7};
-  // TODO: initialise red and blue densities
+  colour r{/*R=*/L, /*C=*/L, /*rho_0=*/1.0, /*alpha=*/0.2, /*A=*/0.5, /*nu=*/0.1667, /*beta=*/0.7};
+  cout << "RED" << r << endl;
+  colour b{/*R=*/L, /*C=*/L, /*rho_0=*/1.0, /*alpha=*/0.2, /*A=*/0.5, /*nu=*/0.1667, /*beta=*/-0.7};
+  cout << "BLUE" << b << endl;
+  // Initialise blue and red densities
+  init_rho(r.rho, r.rho_0, L, 25.0, true);
+  init_rho(b.rho, b.rho_0, L, 25.0, false);
+  rho_mix.copy_(r.rho + b.rho);
+
+  relaxation_function relax_func{r.omega, b.omega, /*delta=*/0.98};
 
   cout << "main loop" << endl;
+  cout << torch::tensor({0}) << endl;
   const int T = 100;
   for (int t=0; t < T; t++)
   {
+    // Calculate interfacial tension
+    eval_phase_field(phase_field, r.rho, r.rho_0, b.rho, b.rho_0);
+    partial.grad(grad_pf, phase_field);
+    n = tnnf::normalize(grad_pf, tnnf::NormalizeFuncOptions().p(2).dim(-1));
+    eval_local_curvature(K, n);
+    Fs.copy_( -0.5*sigma*K*grad_pf ); // TODO: plus or minus sign?
+
+    eval_eta(eta, u, Fs);
+    eval_kappa(kappa, n, rho_mix, r.rho, r.phi, b.rho, b.phi);
+    relax_func.eval(relax_params, phase_field);
+    relax_params.pow_(-1);
+
+    // Time step
+    r.step(u, relax_params, eta, kappa, rho_mix);
+    b.step(u, relax_params, eta, kappa, rho_mix);
+
+    // solver::calc_rho(r.rho, r.adv_f);
+    // solver::calc_rho(b.rho, b.adv_f);
+    r.rho.copy_( r.adv_f.sum(2) );
+    b.rho.copy_( b.adv_f.sum(2) );
+    rho_mix.copy_(r.rho + b.rho);
+
+    solver::calc_u(u, r.adv_f + b.adv_f, rho_mix.unsqueeze(-1));
   }
 
   return 0;

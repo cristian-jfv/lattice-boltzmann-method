@@ -96,3 +96,8 @@ set_property(TARGET static_droplet_test PROPERTY CXX_STANDARD 17)
 target_link_libraries(static_droplet_test
 		PRIVATE "${TORCH_LIBRARIES}" solver utils)
 
+add_executable(rk_static_droplet_test test/rk_static_droplet_test.cpp)
+set_property(TARGET rk_static_droplet_test PROPERTY CXX_STANDARD 17)
+target_link_libraries(rk_static_droplet_test
+		PRIVATE "${TORCH_LIBRARIES}" solver utils)
+
