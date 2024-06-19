@@ -159,6 +159,25 @@ public:
     periodic_boundary_condition(adv_f, col_f);
   }
 
+  void eval_equilibrium(Tensor &omega, const Tensor &rho_, const Tensor &u)
+  {
+    Tensor E_u = torch::matmul(u,E);
+    Tensor u_u = (u*u).sum(2).unsqueeze(-1);
+
+    // Tensor A = ics2*E_u*xi;
+    // Tensor B = 0.5*ics2*ics2*E_u.pow(2);
+    // Tensor C = 0.5*ics2*u_u;
+    // Tensor D = torch::mul(A + B - C, W);
+
+    omega.copy_(
+      rho_.unsqueeze(-1)*(
+        phi
+        + torch::mul(ics2*E_u*xi + 0.5*ics2*ics2*E_u.pow(2) - 0.5*ics2*u_u, W)
+      )
+    );
+  }
+
+
 private:
 
   void periodic_boundary_condition(Tensor &adv_f, const Tensor &col_f)
@@ -206,24 +225,6 @@ private:
     eval_equilibrium(equ_f, rho_, u);
     omega.copy_(
       omega*(equ_f - adv_f)
-    );
-  }
-
-  void eval_equilibrium(Tensor &omega, const Tensor &rho_, const Tensor &u)
-  {
-    Tensor E_u = torch::matmul(u,E);
-    Tensor u_u = (u*u).sum(2).unsqueeze(-1);
-
-    // Tensor A = ics2*E_u*xi;
-    // Tensor B = 0.5*ics2*ics2*E_u.pow(2);
-    // Tensor C = 0.5*ics2*u_u;
-    // Tensor D = torch::mul(A + B - C, W);
-
-    omega.copy_(
-      rho_.unsqueeze(-1)*(
-        phi
-        + torch::mul(ics2*E_u*xi + 0.5*ics2*ics2*E_u.pow(2) - 0.5*ics2*u_u, W)
-      )
     );
   }
 
@@ -389,7 +390,7 @@ void eval_local_curvature(Tensor &K, const Tensor &n)
   #define ny n.index({Ellipsis,1})
   K = (nx*ny*(partial.y(nx) + partial.x(ny))
       - nx.pow(2.0)*partial.y(ny) - ny.pow(2.0)*partial.x(nx))
-    .unsqueeze(-1).clone().detach();
+    .clone().detach();
 }
 
 void eval_phase_field
@@ -449,22 +450,53 @@ int main()
   cout << "BLUE" << b << endl;
   // Initialise blue and red densities
   init_rho(r.rho, r.rho_0, L, 25.0, true);
+  r.eval_equilibrium(r.adv_f, r.rho, u);
   init_rho(b.rho, b.rho_0, L, 25.0, false);
+  b.eval_equilibrium(b.adv_f, b.rho, u);
   rho_mix.copy_(r.rho + b.rho);
 
   relaxation_function relax_func{r.omega, b.omega, /*delta=*/0.98};
 
+  const int T = 100;
+
+  // Results
+  Tensor r_fs = torch::zeros({L,L,9,T});
+  Tensor b_fs = torch::zeros({L,L,9,T});
+  Tensor uxs = torch::zeros({L,L,T});
+  Tensor uys = torch::zeros_like(uxs);
+  Tensor rhos = torch::zeros_like(uxs);
+  Tensor rhons = torch::zeros_like(uxs);
+  Tensor nxs = torch::zeros_like(uxs);
+  Tensor nys = torch::zeros_like(uxs);
+  Tensor Ks = torch::zeros_like(uxs);
+  Tensor Fsxs = torch::zeros_like(uxs);
+  Tensor Fsys = torch::zeros_like(uxs);
+  Tensor norms = torch::zeros_like(uxs);
+  Tensor gradxs = torch::zeros_like(uxs);
+  Tensor gradys = torch::zeros_like(uxs);
+
   cout << "main loop" << endl;
   cout << torch::tensor({0}) << endl;
-  const int T = 100;
   for (int t=0; t < T; t++)
   {
     // Calculate interfacial tension
     eval_phase_field(phase_field, r.rho, r.rho_0, b.rho, b.rho_0);
+    rhons.index({Ellipsis,t}) = phase_field.clone().detach();
+
     partial.grad(grad_pf, phase_field);
+    gradxs.index({Ellipsis,t}) = grad_pf.index({Ellipsis,0}).clone().detach();
+    gradys.index({Ellipsis,t}) = grad_pf.index({Ellipsis,1}).clone().detach();
+
     n = tnnf::normalize(grad_pf, tnnf::NormalizeFuncOptions().p(2).dim(-1));
+    nxs.index({Ellipsis,t}) = n.index({Ellipsis, 0}).clone().detach();
+    nys.index({Ellipsis,t}) = n.index({Ellipsis, 1}).clone().detach();
+
     eval_local_curvature(K, n);
-    Fs.copy_( -0.5*sigma*K*grad_pf ); // TODO: plus or minus sign?
+    Ks.index({Ellipsis,t}) = K.clone().detach();
+
+    Fs.copy_( -0.5*sigma*K.unsqueeze(-1)*grad_pf ); // TODO: plus or minus sign?
+    Fsxs.index({Ellipsis,t}) = Fs.index({Ellipsis,0});
+    Fsys.index({Ellipsis,t}) = Fs.index({Ellipsis,1});
 
     eval_eta(eta, u, Fs);
     eval_kappa(kappa, n, rho_mix, r.rho, r.phi, b.rho, b.phi);
@@ -482,7 +514,25 @@ int main()
     rho_mix.copy_(r.rho + b.rho);
 
     solver::calc_u(u, r.adv_f + b.adv_f, rho_mix.unsqueeze(-1));
+    uxs.index({Ellipsis,t}) = u.index({Ellipsis, 0}).clone().detach();
+    uys.index({Ellipsis,t}) = u.index({Ellipsis, 1}).clone().detach();
+    rhos.index({Ellipsis,t}) = rho_mix.clone().detach();
   }
+  cout << "saving results" << endl;
+  torch::save(r_fs,   "rk-static-droplet-r-fs.pt");
+  torch::save(b_fs,   "rk-static-droplet-b-fs.pt");
+  torch::save(uxs,    "rk-static-droplet-ux.pt");
+  torch::save(uys,    "rk-static-droplet-uy.pt");
+  torch::save(nxs,    "rk-static-droplet-nx.pt");
+  torch::save(nys,    "rk-static-droplet-ny.pt");
+  torch::save(rhos,   "rk-static-droplet-rho.pt");
+  torch::save(rhons,  "rk-static-droplet-rhon.pt");
+  torch::save(Ks,     "rk-static-droplet-ks.pt");
+  torch::save(norms,  "rk-static-droplet-norms.pt");
+  torch::save(Fsxs,   "rk-static-droplet-fx.pt");
+  torch::save(Fsys,   "rk-static-droplet-fy.pt");
+  torch::save(gradxs, "rk-static-droplet-gradx.pt");
+  torch::save(gradys, "rk-static-droplet-grady.pt");
 
   return 0;
 }
