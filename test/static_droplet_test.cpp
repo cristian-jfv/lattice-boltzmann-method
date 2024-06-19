@@ -10,6 +10,8 @@
 #include "../src/solver.hpp"
 #include "../src/utils.hpp"
 
+#define L_stat 100
+
 using std::cerr;
 using std::cout;
 using std::endl;
@@ -33,6 +35,7 @@ const Tensor E = torch::tensor(
    {0.0, 0.0, 1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0}},
   torch::TensorOptions().dtype(torch::kDouble).device(torch::kCUDA));
 const torch::Tensor E_E = (E*E).sum_to_size({1,9}).clone().detach();
+const Tensor E_rep = E.unsqueeze(0).unsqueeze(0).repeat({L_stat,L_stat,1,1});
 
 const Tensor M_original = torch::tensor(
   {{ 1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0,  1.0},
@@ -48,6 +51,7 @@ const Tensor M_original = torch::tensor(
 // Use the tranpose to enable matrix multiplication latter on
 const Tensor M = M_original.clone().detach();
 //const Tensor Mi = M_original.inverse().clone().detach();
+const Tensor M_rep = M.unsqueeze(0).unsqueeze(0).repeat({L_stat,L_stat,1,1});
 
 const Tensor Mi = (1.0/36.0)*torch::tensor(
   {{  4.0, -4.0,  4.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0},
@@ -250,14 +254,11 @@ public:
     rho = torch::zeros({L, L, 1}, torch::kCUDA);
     init_rho(rho, rho_0, L, R, invert_sigmoid);
     f = torch::zeros({L, L, 9}, torch::kCUDA);
+    f.copy_(1.0*equilibrium(torch::zeros({L,L,2}, torch::kCUDA)));
     mrtp_f = torch::zeros_like(f);
     reco_f = torch::zeros_like(f);
     coll_f = torch::zeros_like(f);
     m_eq = torch::zeros_like(f);
-
-    //update_m_eq(torch::zeros({L,L,2}));
-    f.copy_(1.0*equilibrium(torch::zeros({L,L,2}, torch::kCUDA)));
-    //m_eq = torch::zeros_like(f);
 
     C = torch::zeros_like(f);
 
@@ -333,7 +334,7 @@ private:
     {
       for (int c=0; c<Cols; c++)
       {
-        Tensor SUM = M.matmul(f.index({r,c,Ellipsis}) - EQU.index({r,c,Ellipsis})); // - m_eq.index({r,c,Ellipsis});
+        Tensor SUM = M.matmul(f.index({r,c,Ellipsis}) - EQU.index({r,c,Ellipsis}));
 
         Omega.index_put_({r,c,Ellipsis},
                          Mi.matmul(
@@ -408,8 +409,8 @@ private:
   }
   double init_beta(bool invert)
   {
-    if (invert) return 0.7;
-    return -0.7;
+    //if (invert) return 0.7;
+    return 0.7;
   }
 
   double init_omega(double nu, double cs2) { return 0.5 + nu/cs2; }
@@ -483,7 +484,7 @@ int main(int argc, char *argv[])
   const double sigma = 0.1; // Interfacial tension coefficient
 
   // Initialization
-  color r{L, R, /*rho_0=*/10.0, /*alpha=*/0.92, /*nu=*/0.1667, /*A=*/0.5, true};
+  color r{L, R, /*rho_0=*/1.0, /*alpha=*/0.2, /*nu=*/0.1667, /*A=*/0.5, true};
   cout << "RED" << r << endl;
   color b{L, R, /*rho_0=*/1.0, /*alpha=*/0.2, /*nu=*/0.1667, /*A=*/0.5};
   cout << "BLUE" << b << endl;
@@ -542,7 +543,7 @@ int main(int argc, char *argv[])
     //normalize_grad(n, grad_rho_n, grad_norm);
     n = torch::nn::functional::normalize(grad_rho_n,
                                          torch::nn::functional::NormalizeFuncOptions()
-                                         .p(2).dim(-1).eps(1e-12));
+                                         .p(2).dim(-1));
     //n = torch::where(torch::abs(n) <= 1e-1, torch::full_like(n, 0.0), n);
     nxs.index({Ellipsis,t}) = n.index({Ellipsis, 0}).clone().detach();
     nys.index({Ellipsis,t}) = n.index({Ellipsis, 1}).clone().detach();
@@ -600,7 +601,7 @@ void build_F(Tensor &F, const Tensor &u, const Tensor &Fs)
   //#define uy u.index({Ellipsis,1})
   #define Fsx Fs.index({Ellipsis,0})
   #define Fsy Fs.index({Ellipsis,1})
-
+/*
   F.index({Ellipsis,0}) = 0.0;
   F.index({Ellipsis,1}) = 6.0*(ux*Fsx + uy*Fsy).clone().detach();
   F.index({Ellipsis,2}) = -6.0*(ux*Fsx + uy*Fsy).clone().detach();
@@ -610,6 +611,16 @@ void build_F(Tensor &F, const Tensor &u, const Tensor &Fs)
   F.index({Ellipsis,6}) = -1.0*Fsy.clone().detach();
   F.index({Ellipsis,7}) = 2.0*(ux*Fsx - uy*Fsy).clone().detach();
   F.index({Ellipsis,8}) = (ux*Fsy + uy*Fsx).clone().detach();
+  */
+  Tensor E_u = torch::matmul(u,E);
+
+  Tensor A = 3.0*(E_rep - u.unsqueeze(-1)) + 9.0*(E_u.unsqueeze(-2)*E);
+  Tensor B = A*Fs.unsqueeze(-1);
+  Tensor C = B.sum(2);
+  Tensor D = torch::mul(C,W);
+
+  F = M_rep.matmul(D.unsqueeze(-1)).squeeze(-1).clone().detach();
+
 }
 
 void eval_local_curvature(Tensor &K, const Tensor &n)
