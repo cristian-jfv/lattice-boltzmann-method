@@ -9,7 +9,8 @@
 #include "../src/solver.hpp"
 #include "../src/utils.hpp"
 
-#define L 200
+#define L 400
+#define Radius 25.0
 
 using torch::Tensor;
 using torch::indexing::Ellipsis;
@@ -29,11 +30,11 @@ const utils::indices v_top{1,Ellipsis};
 const utils::indices bottom{-1,Ellipsis};
 const utils::indices v_bottom{-2,Ellipsis};
 
-const utils::indices left{Slice(2, -2), 0, Ellipsis};
-const utils::indices v_left{Slice(2, -2), 1, Ellipsis};
+const utils::indices left{Slice(1, -1), 0, Ellipsis};
+const utils::indices v_left{Slice(1, -1), 1, Ellipsis};
 
-const utils::indices right{Slice(2, -2), -1, Ellipsis};
-const utils::indices v_right{Slice(2, -2), -2, Ellipsis};
+const utils::indices right{Slice(1, -1), -1, Ellipsis};
+const utils::indices v_right{Slice(1, -1), -2, Ellipsis};
 
 const Tensor W = torch::tensor(
   {4.0/ 9.0,
@@ -172,7 +173,7 @@ public:
   void eval_equilibrium(Tensor &omega, const Tensor &rho_, const Tensor &u)
   {
     Tensor E_u = torch::matmul(u,E);
-    Tensor u_u = (u*u).sum(2).unsqueeze(-1);
+    Tensor u_u = (u*u).sum(-1).unsqueeze(-1);
 
     // Tensor A = ics2*E_u*xi;
     // Tensor B = 0.5*ics2*ics2*E_u.pow(2);
@@ -200,12 +201,13 @@ private:
 /*
     // top
     Tensor u_w = (1.5*u.index(top) - 0.5*u.index(v_top)).clone().detach();
-    Tensor abb_bc = rho.index(top).unsqueeze(-1)*(
-      torch::mul( 2.0 + ics2*ics2*torch::matmul(u_w,E).pow(2.0) - ics2*(u_w*u_w).sum(1).unsqueeze(-1) ,W)
-    ).clone().detach();
-    adv_f.index({0, Slice(), 3}) = (-col_f.index({0, Slice(), 1}) + abb_bc.index({Slice(), 1})).clone().detach();
+    //Tensor w_equ_f = torch::zeros({L,9},dev);
+    Tensor abb_bc = torch::zeros({L,9},dev);
+// rho.index(top).unsqueeze(-1)*(torch::mul( 2.0 + ics2*ics2*torch::matmul(u_w,E).pow(2.0) - ics2*(u_w*u_w).sum(1).unsqueeze(-1) ,W)).clone().detach();
+    eval_equilibrium(abb_bc, rho.index(top), u_w);
+    //adv_f.index({0, Slice(), 3}) = (-col_f.index({0, Slice(), 1}) + abb_bc.index({Slice(), 1})).clone().detach();
     adv_f.index({0, Slice(), 4}) = (-col_f.index({0, Slice(), 2}) + abb_bc.index({Slice(), 2})).clone().detach();
-    adv_f.index({0, Slice(), 1}) = (-col_f.index({0, Slice(), 3}) + abb_bc.index({Slice(), 3})).clone().detach();
+    //adv_f.index({0, Slice(), 1}) = (-col_f.index({0, Slice(), 3}) + abb_bc.index({Slice(), 3})).clone().detach();
     adv_f.index({0, Slice(), 2}) = (-col_f.index({0, Slice(), 4}) + abb_bc.index({Slice(), 4})).clone().detach();
     adv_f.index({0, Slice(), 7}) = (-col_f.index({0, Slice(), 5}) + abb_bc.index({Slice(), 5})).clone().detach();
     adv_f.index({0, Slice(), 8}) = (-col_f.index({0, Slice(), 6}) + abb_bc.index({Slice(), 6})).clone().detach();
@@ -214,9 +216,8 @@ private:
 
     // bottom
     u_w = (1.5*u.index(bottom) - 0.5*u.index(v_bottom)).clone().detach();
-    abb_bc = rho.index(bottom).unsqueeze(-1)*(
-      torch::mul( 2.0 + ics2*ics2*torch::matmul(u_w,E).pow(2.0) - ics2*(u_w*u_w).sum(1).unsqueeze(-1) ,W)
-    ).clone().detach();
+    //abb_bc = rho.index(bottom).unsqueeze(-1)*(torch::mul( 2.0 + ics2*ics2*torch::matmul(u_w,E).pow(2.0) - ics2*(u_w*u_w).sum(1).unsqueeze(-1) ,W)).clone().detach();
+    eval_equilibrium(abb_bc, rho.index(bottom), u_w);
     adv_f.index({-1, Slice(), 3}) = (-col_f.index({-1, Slice(), 1}) + abb_bc.index({Slice(), 1})).clone().detach();
     adv_f.index({-1, Slice(), 4}) = (-col_f.index({-1, Slice(), 2}) + abb_bc.index({Slice(), 2})).clone().detach();
     adv_f.index({-1, Slice(), 1}) = (-col_f.index({-1, Slice(), 3}) + abb_bc.index({Slice(), 3})).clone().detach();
@@ -225,7 +226,7 @@ private:
     adv_f.index({-1, Slice(), 8}) = (-col_f.index({-1, Slice(), 6}) + abb_bc.index({Slice(), 6})).clone().detach();
     adv_f.index({-1, Slice(), 5}) = (-col_f.index({-1, Slice(), 7}) + abb_bc.index({Slice(), 7})).clone().detach();
     adv_f.index({-1, Slice(), 6}) = (-col_f.index({-1, Slice(), 8}) + abb_bc.index({Slice(), 8})).clone().detach();
-
+    //change Slice(2, -2) to Slice(1,-1)
     // left
     u_w = (1.5*u.index(left) - 0.5*u.index(v_left)).clone().detach();
     abb_bc = rho.index(left).unsqueeze(-1)*(
@@ -510,14 +511,14 @@ int main()
   Tensor n = torch::zeros({L,L,2}, dev);
   Tensor Fs = torch::zeros({L,L,2}, dev);
 
-  colour r{/*R=*/L, /*C=*/L, /*rho_0=*/1.0, /*alpha=*/0.2, /*A=*/0.5, /*nu=*/0.1667, /*beta=*/0.7};
+  colour r{/*R=*/L, /*C=*/L, /*rho_0=*/1.0, /*alpha=*/0.2, /*A=*/0.33333333, /*nu=*/0.1667, /*beta=*/0.7};
   cout << "RED" << r << endl;
-  colour b{/*R=*/L, /*C=*/L, /*rho_0=*/1.0, /*alpha=*/0.2, /*A=*/0.5, /*nu=*/0.1667, /*beta=*/-0.7};
+  colour b{/*R=*/L, /*C=*/L, /*rho_0=*/1.0, /*alpha=*/0.2, /*A=*/0.66666666, /*nu=*/0.1667, /*beta=*/-0.7};
   cout << "BLUE" << b << endl;
   // Initialise blue and red densities
-  init_rho(r.rho, r.rho_0, L, 25.0, true);
+  init_rho(r.rho, r.rho_0, L, Radius, true);
   r.eval_equilibrium(r.adv_f, r.rho, u);
-  init_rho(b.rho, b.rho_0, L, 25.0, false);
+  init_rho(b.rho, b.rho_0, L, Radius, false);
   b.eval_equilibrium(b.adv_f, b.rho, u);
   //rho_mix.copy_(r.rho + b.rho);
 
@@ -570,7 +571,7 @@ int main()
     eval_local_curvature(K, n);
     Ks.index({Ellipsis,t}) = K.clone().detach();
 
-    Fs.copy_(-0.5*sigma*K.unsqueeze(-1)*grad_pf ); // TODO: plus or minus sign?
+    Fs.copy_( 0.5*sigma*K.unsqueeze(-1)*grad_pf ); // TODO: plus or minus sign?
     Fsxs.index({Ellipsis,t}) = Fs.index({Ellipsis,0});
     Fsys.index({Ellipsis,t}) = Fs.index({Ellipsis,1});
 
