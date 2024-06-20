@@ -1,3 +1,5 @@
+#include <ATen/ops/full_like.h>
+#include <ATen/ops/where.h>
 #include <iostream>
 #include <torch/nn/functional/normalization.h>
 #include <torch/nn/options/normalization.h>
@@ -6,7 +8,7 @@
 #include "../src/solver.hpp"
 #include "../src/utils.hpp"
 
-#define L 100
+#define L 200
 
 using torch::Tensor;
 using torch::indexing::Ellipsis;
@@ -117,7 +119,7 @@ public:
   Tensor omega1; // Result of the standard single phase operator
   Tensor omega2; // Result of the perturbation operator
   Tensor omega3; // Result of the redistribution operator
-  Tensor equ_f; // Stores the equilibirum distribution function
+  Tensor equ_f; // Stores the equilibrium distribution function
   Tensor col_f; // Stores the dist. function after the collision step
   Tensor adv_f; // Stores the dist. funciton after the advection step
   Tensor rho;
@@ -156,7 +158,7 @@ public:
       adv_f + omega3
     );
     solver::advect(adv_f, col_f);
-    periodic_boundary_condition(adv_f, col_f);
+    apply_boundary_condition(adv_f, col_f);
   }
 
   void eval_equilibrium(Tensor &omega, const Tensor &rho_, const Tensor &u)
@@ -180,7 +182,7 @@ public:
 
 private:
 
-  void periodic_boundary_condition(Tensor &adv_f, const Tensor &col_f)
+  void apply_boundary_condition(Tensor &adv_f, const Tensor &col_f)
   {
     // Complete the post-advection population using the post-collision populations
     adv_f.index(left) = col_f.index(right).clone().detach();
@@ -219,11 +221,11 @@ private:
     );
   }
 
-  void eval_omega1(Tensor &omega, const Tensor &rho_, const Tensor &u)
+  void eval_omega1(Tensor &omega_, const Tensor &rho_, const Tensor &u)
   {
     // TODO: Single or position wise relaxation parameter?
     eval_equilibrium(equ_f, rho_, u);
-    omega.copy_(
+    omega_.copy_(
       omega*(equ_f - adv_f)
     );
   }
@@ -386,10 +388,8 @@ void eval_kappa
 
 void eval_local_curvature(Tensor &K, const Tensor &n)
 {
-  #define nx n.index({Ellipsis,0})
-  #define ny n.index({Ellipsis,1})
-  K = (nx*ny*(partial.y(nx) + partial.x(ny))
-      - nx.pow(2.0)*partial.y(ny) - ny.pow(2.0)*partial.x(nx))
+  K = (n.index({Ellipsis,0})*n.index({Ellipsis,1})*(partial.y(n.index({Ellipsis,0})) + partial.x(n.index({Ellipsis,1})))
+      - n.index({Ellipsis,0}).pow(2.0)*partial.y(n.index({Ellipsis,1})) - n.index({Ellipsis,1}).pow(2.0)*partial.x(n.index({Ellipsis,0})))
     .clone().detach();
 }
 
@@ -440,6 +440,7 @@ int main()
   const double sigma = 0.1;
   Tensor phase_field = torch::zeros({L,L}, dev);
   Tensor grad_pf = torch::zeros({L,L,2}, dev);
+  Tensor grad_norm = torch::zeros({L,L}, dev);
   Tensor K = torch::zeros({L,L}, dev);
   Tensor n = torch::zeros({L,L,2}, dev);
   Tensor Fs = torch::zeros({L,L,2}, dev);
@@ -457,7 +458,7 @@ int main()
 
   relaxation_function relax_func{r.omega, b.omega, /*delta=*/0.98};
 
-  const int T = 100;
+  const int T = 300;
 
   // Results
   Tensor r_fs = torch::zeros({L,L,9,T});
@@ -484,17 +485,27 @@ int main()
     rhons.index({Ellipsis,t}) = phase_field.clone().detach();
 
     partial.grad(grad_pf, phase_field);
+    grad_norm.copy_(
+      torch::sqrt(grad_pf.index({Ellipsis, 0}).pow(2)
+                  + grad_pf.index({Ellipsis, 1}).pow(2))
+    );
+    norms.index({Ellipsis,t}) = grad_norm.clone().detach();
+    Tensor copy_grad_pf = torch::where
+    (
+      grad_norm.unsqueeze(-1) <= 0.5*grad_norm.max(),
+      torch::full_like(grad_pf, 0.0), grad_pf
+    );
     gradxs.index({Ellipsis,t}) = grad_pf.index({Ellipsis,0}).clone().detach();
     gradys.index({Ellipsis,t}) = grad_pf.index({Ellipsis,1}).clone().detach();
 
-    n = tnnf::normalize(grad_pf, tnnf::NormalizeFuncOptions().p(2).dim(-1));
+    n = tnnf::normalize(copy_grad_pf, tnnf::NormalizeFuncOptions().p(2).dim(-1));
     nxs.index({Ellipsis,t}) = n.index({Ellipsis, 0}).clone().detach();
     nys.index({Ellipsis,t}) = n.index({Ellipsis, 1}).clone().detach();
 
     eval_local_curvature(K, n);
     Ks.index({Ellipsis,t}) = K.clone().detach();
 
-    Fs.copy_( -0.5*sigma*K.unsqueeze(-1)*grad_pf ); // TODO: plus or minus sign?
+    Fs.copy_(-0.5*sigma*K.unsqueeze(-1)*grad_pf ); // TODO: plus or minus sign?
     Fsxs.index({Ellipsis,t}) = Fs.index({Ellipsis,0});
     Fsys.index({Ellipsis,t}) = Fs.index({Ellipsis,1});
 
@@ -505,7 +516,9 @@ int main()
 
     // Time step
     r.step(u, relax_params, eta, kappa, rho_mix);
+    r_fs.index_put_({Ellipsis,t}, r.adv_f);
     b.step(u, relax_params, eta, kappa, rho_mix);
+    b_fs.index_put_({Ellipsis,t}, b.adv_f);
 
     // solver::calc_rho(r.rho, r.adv_f);
     // solver::calc_rho(b.rho, b.adv_f);
@@ -514,6 +527,8 @@ int main()
     rho_mix.copy_(r.rho + b.rho);
 
     solver::calc_u(u, r.adv_f + b.adv_f, rho_mix.unsqueeze(-1));
+    u = (u + 0.5*Fs).clone().detach();
+
     uxs.index({Ellipsis,t}) = u.index({Ellipsis, 0}).clone().detach();
     uys.index({Ellipsis,t}) = u.index({Ellipsis, 1}).clone().detach();
     rhos.index({Ellipsis,t}) = rho_mix.clone().detach();
