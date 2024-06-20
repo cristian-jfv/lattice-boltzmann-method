@@ -1,3 +1,4 @@
+#include <ATen/TensorIndexing.h>
 #include <ATen/ops/full_like.h>
 #include <ATen/ops/where.h>
 #include <iostream>
@@ -23,9 +24,16 @@ const double cs2 = 1.0/3.0; // numerical speed of sound
 const double ics2 = 3.0;
 
 const utils::indices top{0,Ellipsis};
+const utils::indices v_top{1,Ellipsis};
+
 const utils::indices bottom{-1,Ellipsis};
-const utils::indices left{Slice(1, -1), 0, Ellipsis};
-const utils::indices right{Slice(1, -1), -1, Ellipsis};
+const utils::indices v_bottom{-2,Ellipsis};
+
+const utils::indices left{Slice(2, -2), 0, Ellipsis};
+const utils::indices v_left{Slice(2, -2), 1, Ellipsis};
+
+const utils::indices right{Slice(2, -2), -1, Ellipsis};
+const utils::indices v_right{Slice(2, -2), -2, Ellipsis};
 
 const Tensor W = torch::tensor(
   {4.0/ 9.0,
@@ -158,7 +166,7 @@ public:
       adv_f + omega3
     );
     solver::advect(adv_f, col_f);
-    apply_boundary_condition(adv_f, col_f);
+    apply_boundary_conditions(adv_f, col_f, u);
   }
 
   void eval_equilibrium(Tensor &omega, const Tensor &rho_, const Tensor &u)
@@ -182,13 +190,70 @@ public:
 
 private:
 
-  void apply_boundary_condition(Tensor &adv_f, const Tensor &col_f)
+  void apply_boundary_conditions(Tensor &adv_f, const Tensor &col_f, const Tensor &u)
   {
     // Complete the post-advection population using the post-collision populations
     adv_f.index(left) = col_f.index(right).clone().detach();
     adv_f.index(right) = col_f.index(left).clone().detach();
     adv_f.index(top) = col_f.index(bottom).clone().detach();
     adv_f.index(bottom) = col_f.index(top).clone().detach();
+/*
+    // top
+    Tensor u_w = (1.5*u.index(top) - 0.5*u.index(v_top)).clone().detach();
+    Tensor abb_bc = rho.index(top).unsqueeze(-1)*(
+      torch::mul( 2.0 + ics2*ics2*torch::matmul(u_w,E).pow(2.0) - ics2*(u_w*u_w).sum(1).unsqueeze(-1) ,W)
+    ).clone().detach();
+    adv_f.index({0, Slice(), 3}) = (-col_f.index({0, Slice(), 1}) + abb_bc.index({Slice(), 1})).clone().detach();
+    adv_f.index({0, Slice(), 4}) = (-col_f.index({0, Slice(), 2}) + abb_bc.index({Slice(), 2})).clone().detach();
+    adv_f.index({0, Slice(), 1}) = (-col_f.index({0, Slice(), 3}) + abb_bc.index({Slice(), 3})).clone().detach();
+    adv_f.index({0, Slice(), 2}) = (-col_f.index({0, Slice(), 4}) + abb_bc.index({Slice(), 4})).clone().detach();
+    adv_f.index({0, Slice(), 7}) = (-col_f.index({0, Slice(), 5}) + abb_bc.index({Slice(), 5})).clone().detach();
+    adv_f.index({0, Slice(), 8}) = (-col_f.index({0, Slice(), 6}) + abb_bc.index({Slice(), 6})).clone().detach();
+    adv_f.index({0, Slice(), 5}) = (-col_f.index({0, Slice(), 7}) + abb_bc.index({Slice(), 7})).clone().detach();
+    adv_f.index({0, Slice(), 6}) = (-col_f.index({0, Slice(), 8}) + abb_bc.index({Slice(), 8})).clone().detach();
+
+    // bottom
+    u_w = (1.5*u.index(bottom) - 0.5*u.index(v_bottom)).clone().detach();
+    abb_bc = rho.index(bottom).unsqueeze(-1)*(
+      torch::mul( 2.0 + ics2*ics2*torch::matmul(u_w,E).pow(2.0) - ics2*(u_w*u_w).sum(1).unsqueeze(-1) ,W)
+    ).clone().detach();
+    adv_f.index({-1, Slice(), 3}) = (-col_f.index({-1, Slice(), 1}) + abb_bc.index({Slice(), 1})).clone().detach();
+    adv_f.index({-1, Slice(), 4}) = (-col_f.index({-1, Slice(), 2}) + abb_bc.index({Slice(), 2})).clone().detach();
+    adv_f.index({-1, Slice(), 1}) = (-col_f.index({-1, Slice(), 3}) + abb_bc.index({Slice(), 3})).clone().detach();
+    adv_f.index({-1, Slice(), 2}) = (-col_f.index({-1, Slice(), 4}) + abb_bc.index({Slice(), 4})).clone().detach();
+    adv_f.index({-1, Slice(), 7}) = (-col_f.index({-1, Slice(), 5}) + abb_bc.index({Slice(), 5})).clone().detach();
+    adv_f.index({-1, Slice(), 8}) = (-col_f.index({-1, Slice(), 6}) + abb_bc.index({Slice(), 6})).clone().detach();
+    adv_f.index({-1, Slice(), 5}) = (-col_f.index({-1, Slice(), 7}) + abb_bc.index({Slice(), 7})).clone().detach();
+    adv_f.index({-1, Slice(), 6}) = (-col_f.index({-1, Slice(), 8}) + abb_bc.index({Slice(), 8})).clone().detach();
+
+    // left
+    u_w = (1.5*u.index(left) - 0.5*u.index(v_left)).clone().detach();
+    abb_bc = rho.index(left).unsqueeze(-1)*(
+      torch::mul( 2.0 + ics2*ics2*torch::matmul(u_w,E).pow(2.0) - ics2*(u_w*u_w).sum(1).unsqueeze(-1) ,W)
+    ).clone().detach();
+    adv_f.index({Slice(2,-2), 0, 3}) = (-col_f.index({Slice(2,-2), 0, 1}) + abb_bc.index({Slice(), 1})).clone().detach();
+    adv_f.index({Slice(2,-2), 0, 4}) = (-col_f.index({Slice(2,-2), 0, 2}) + abb_bc.index({Slice(), 2})).clone().detach();
+    adv_f.index({Slice(2,-2), 0, 1}) = (-col_f.index({Slice(2,-2), 0, 3}) + abb_bc.index({Slice(), 3})).clone().detach();
+    adv_f.index({Slice(2,-2), 0, 2}) = (-col_f.index({Slice(2,-2), 0, 4}) + abb_bc.index({Slice(), 4})).clone().detach();
+    adv_f.index({Slice(2,-2), 0, 7}) = (-col_f.index({Slice(2,-2), 0, 5}) + abb_bc.index({Slice(), 5})).clone().detach();
+    adv_f.index({Slice(2,-2), 0, 8}) = (-col_f.index({Slice(2,-2), 0, 6}) + abb_bc.index({Slice(), 6})).clone().detach();
+    adv_f.index({Slice(2,-2), 0, 5}) = (-col_f.index({Slice(2,-2), 0, 7}) + abb_bc.index({Slice(), 7})).clone().detach();
+    adv_f.index({Slice(2,-2), 0, 6}) = (-col_f.index({Slice(2,-2), 0, 8}) + abb_bc.index({Slice(), 8})).clone().detach();
+
+    // right
+    u_w = (1.5*u.index(right) - 0.5*u.index(v_right)).clone().detach();
+    abb_bc = rho.index(right).unsqueeze(-1)*(
+      torch::mul( 2.0 + ics2*ics2*torch::matmul(u_w,E).pow(2.0) - ics2*(u_w*u_w).sum(1).unsqueeze(-1) ,W)
+    ).clone().detach();
+    adv_f.index({Slice(2,-2), -1, 3}) = (-col_f.index({Slice(2,-2), -1, 1}) + abb_bc.index({Slice(), 1})).clone().detach();
+    adv_f.index({Slice(2,-2), -1, 4}) = (-col_f.index({Slice(2,-2), -1, 2}) + abb_bc.index({Slice(), 2})).clone().detach();
+    adv_f.index({Slice(2,-2), -1, 1}) = (-col_f.index({Slice(2,-2), -1, 3}) + abb_bc.index({Slice(), 3})).clone().detach();
+    adv_f.index({Slice(2,-2), -1, 2}) = (-col_f.index({Slice(2,-2), -1, 4}) + abb_bc.index({Slice(), 4})).clone().detach();
+    adv_f.index({Slice(2,-2), -1, 7}) = (-col_f.index({Slice(2,-2), -1, 5}) + abb_bc.index({Slice(), 5})).clone().detach();
+    adv_f.index({Slice(2,-2), -1, 8}) = (-col_f.index({Slice(2,-2), -1, 6}) + abb_bc.index({Slice(), 6})).clone().detach();
+    adv_f.index({Slice(2,-2), -1, 5}) = (-col_f.index({Slice(2,-2), -1, 7}) + abb_bc.index({Slice(), 7})).clone().detach();
+    adv_f.index({Slice(2,-2), -1, 6}) = (-col_f.index({Slice(2,-2), -1, 8}) + abb_bc.index({Slice(), 8})).clone().detach();
+    */
   }
 
   void eval_omega3
@@ -429,7 +494,7 @@ int main()
 
   // Macroscopic parameters
   Tensor u = torch::zeros({L,L,2}, dev);
-  Tensor rho_mix = torch::zeros({L,L}, dev);
+  Tensor rho_mix = torch::ones({L,L}, dev);
 
   // Colour-independet quantities
   Tensor eta = torch::zeros({L,L,9}, dev);
@@ -454,7 +519,7 @@ int main()
   r.eval_equilibrium(r.adv_f, r.rho, u);
   init_rho(b.rho, b.rho_0, L, 25.0, false);
   b.eval_equilibrium(b.adv_f, b.rho, u);
-  rho_mix.copy_(r.rho + b.rho);
+  //rho_mix.copy_(r.rho + b.rho);
 
   relaxation_function relax_func{r.omega, b.omega, /*delta=*/0.98};
 
