@@ -1,15 +1,11 @@
-#include <ATen/TensorIndexing.h>
-#include <ATen/ops/full_like.h>
-#include <ATen/ops/where.h>
 #include <iostream>
-#include <torch/nn/functional/normalization.h>
-#include <torch/nn/options/normalization.h>
+#include <limits>
 #include <torch/torch.h>
 
 #include "../src/solver.hpp"
 #include "../src/utils.hpp"
 
-#define L 400
+#define L 101
 #define Radius 25.0
 
 using torch::Tensor;
@@ -104,8 +100,8 @@ public:
 
   void grad(Tensor &ans, const Tensor &psi)
   {
-    ans.index({Ellipsis,0}) = x(psi);
-    ans.index({Ellipsis,1}) = y(psi);
+    ans.index({Ellipsis,0}) = x(psi).clone().detach();
+    ans.index({Ellipsis,1}) = y(psi).clone().detach();
   }
 
 };
@@ -117,13 +113,18 @@ public:
   const double rho_0;
   const double alpha;
   const double A;
-  const double omega;
+  const double omega_rp;
   const double cks2;
   const double beta;
 
   const Tensor phi;
   const Tensor xi;
   const Tensor zero_u;
+  const Tensor B = torch::tensor(
+  {-4.0/27.0,
+    2.0/27.0, 2.0/27.0, 2.0/27.0, 2.0/27.0,
+    5.0/108.0, 5.0/108.0, 5.0/108.0, 5.0/108.0},
+  torch::TensorOptions().dtype(torch::kDouble).device(dev));
 
   Tensor omega1; // Result of the standard single phase operator
   Tensor omega2; // Result of the perturbation operator
@@ -137,7 +138,7 @@ public:
   rho_0{rho_0},
   alpha{alpha},
   A{A},
-  omega{init_omega(nu)},
+  omega_rp{init_omega(nu)},
   cks2{init_cks2(alpha)},
   beta{beta},
   phi{init_phi(alpha)},
@@ -159,10 +160,19 @@ public:
     const Tensor &relax_params,
     const Tensor &eta,
     const Tensor &kappa,
-    const Tensor &rho_mix
+    const Tensor &rho_mix,
+    const Tensor &F,
+    const Tensor &F_norm
   )
   {
-    eval_omega3(omega3, u, relax_params, eta, kappa, rho_mix);
+    eval_omega3
+      (
+        /*omega_=*/omega3,
+        /*u=*/u,
+        /*relax_params=*/relax_params,
+        /*eta=*/eta,
+        /*kappa=*/kappa,
+        /*rho_mix=*/rho_mix, F, F_norm);
     col_f.copy_(
       adv_f + omega3
     );
@@ -170,7 +180,7 @@ public:
     apply_boundary_conditions(adv_f, col_f, u);
   }
 
-  void eval_equilibrium(Tensor &omega, const Tensor &rho_, const Tensor &u)
+  void eval_equilibrium(Tensor &omega_, const Tensor &rho_, const Tensor &u)
   {
     Tensor E_u = torch::matmul(u,E);
     Tensor u_u = (u*u).sum(-1).unsqueeze(-1);
@@ -180,10 +190,10 @@ public:
     // Tensor C = 0.5*ics2*u_u;
     // Tensor D = torch::mul(A + B - C, W);
 
-    omega.copy_(
+    omega_.copy_(
       rho_.unsqueeze(-1)*(
         phi
-        + torch::mul(ics2*E_u*xi + 0.5*ics2*ics2*E_u.pow(2) - 0.5*ics2*u_u, W)
+        + torch::mul(ics2*E_u + 0.5*ics2*ics2*E_u.pow(2) - 0.5*ics2*u_u, W)
       )
     );
   }
@@ -198,101 +208,56 @@ private:
     adv_f.index(right) = col_f.index(left).clone().detach();
     adv_f.index(top) = col_f.index(bottom).clone().detach();
     adv_f.index(bottom) = col_f.index(top).clone().detach();
-/*
-    // top
-    Tensor u_w = (1.5*u.index(top) - 0.5*u.index(v_top)).clone().detach();
-    //Tensor w_equ_f = torch::zeros({L,9},dev);
-    Tensor abb_bc = torch::zeros({L,9},dev);
-// rho.index(top).unsqueeze(-1)*(torch::mul( 2.0 + ics2*ics2*torch::matmul(u_w,E).pow(2.0) - ics2*(u_w*u_w).sum(1).unsqueeze(-1) ,W)).clone().detach();
-    eval_equilibrium(abb_bc, rho.index(top), u_w);
-    //adv_f.index({0, Slice(), 3}) = (-col_f.index({0, Slice(), 1}) + abb_bc.index({Slice(), 1})).clone().detach();
-    adv_f.index({0, Slice(), 4}) = (-col_f.index({0, Slice(), 2}) + abb_bc.index({Slice(), 2})).clone().detach();
-    //adv_f.index({0, Slice(), 1}) = (-col_f.index({0, Slice(), 3}) + abb_bc.index({Slice(), 3})).clone().detach();
-    adv_f.index({0, Slice(), 2}) = (-col_f.index({0, Slice(), 4}) + abb_bc.index({Slice(), 4})).clone().detach();
-    adv_f.index({0, Slice(), 7}) = (-col_f.index({0, Slice(), 5}) + abb_bc.index({Slice(), 5})).clone().detach();
-    adv_f.index({0, Slice(), 8}) = (-col_f.index({0, Slice(), 6}) + abb_bc.index({Slice(), 6})).clone().detach();
-    adv_f.index({0, Slice(), 5}) = (-col_f.index({0, Slice(), 7}) + abb_bc.index({Slice(), 7})).clone().detach();
-    adv_f.index({0, Slice(), 6}) = (-col_f.index({0, Slice(), 8}) + abb_bc.index({Slice(), 8})).clone().detach();
-
-    // bottom
-    u_w = (1.5*u.index(bottom) - 0.5*u.index(v_bottom)).clone().detach();
-    //abb_bc = rho.index(bottom).unsqueeze(-1)*(torch::mul( 2.0 + ics2*ics2*torch::matmul(u_w,E).pow(2.0) - ics2*(u_w*u_w).sum(1).unsqueeze(-1) ,W)).clone().detach();
-    eval_equilibrium(abb_bc, rho.index(bottom), u_w);
-    adv_f.index({-1, Slice(), 3}) = (-col_f.index({-1, Slice(), 1}) + abb_bc.index({Slice(), 1})).clone().detach();
-    adv_f.index({-1, Slice(), 4}) = (-col_f.index({-1, Slice(), 2}) + abb_bc.index({Slice(), 2})).clone().detach();
-    adv_f.index({-1, Slice(), 1}) = (-col_f.index({-1, Slice(), 3}) + abb_bc.index({Slice(), 3})).clone().detach();
-    adv_f.index({-1, Slice(), 2}) = (-col_f.index({-1, Slice(), 4}) + abb_bc.index({Slice(), 4})).clone().detach();
-    adv_f.index({-1, Slice(), 7}) = (-col_f.index({-1, Slice(), 5}) + abb_bc.index({Slice(), 5})).clone().detach();
-    adv_f.index({-1, Slice(), 8}) = (-col_f.index({-1, Slice(), 6}) + abb_bc.index({Slice(), 6})).clone().detach();
-    adv_f.index({-1, Slice(), 5}) = (-col_f.index({-1, Slice(), 7}) + abb_bc.index({Slice(), 7})).clone().detach();
-    adv_f.index({-1, Slice(), 6}) = (-col_f.index({-1, Slice(), 8}) + abb_bc.index({Slice(), 8})).clone().detach();
-    //change Slice(2, -2) to Slice(1,-1)
-    // left
-    u_w = (1.5*u.index(left) - 0.5*u.index(v_left)).clone().detach();
-    abb_bc = rho.index(left).unsqueeze(-1)*(
-      torch::mul( 2.0 + ics2*ics2*torch::matmul(u_w,E).pow(2.0) - ics2*(u_w*u_w).sum(1).unsqueeze(-1) ,W)
-    ).clone().detach();
-    adv_f.index({Slice(2,-2), 0, 3}) = (-col_f.index({Slice(2,-2), 0, 1}) + abb_bc.index({Slice(), 1})).clone().detach();
-    adv_f.index({Slice(2,-2), 0, 4}) = (-col_f.index({Slice(2,-2), 0, 2}) + abb_bc.index({Slice(), 2})).clone().detach();
-    adv_f.index({Slice(2,-2), 0, 1}) = (-col_f.index({Slice(2,-2), 0, 3}) + abb_bc.index({Slice(), 3})).clone().detach();
-    adv_f.index({Slice(2,-2), 0, 2}) = (-col_f.index({Slice(2,-2), 0, 4}) + abb_bc.index({Slice(), 4})).clone().detach();
-    adv_f.index({Slice(2,-2), 0, 7}) = (-col_f.index({Slice(2,-2), 0, 5}) + abb_bc.index({Slice(), 5})).clone().detach();
-    adv_f.index({Slice(2,-2), 0, 8}) = (-col_f.index({Slice(2,-2), 0, 6}) + abb_bc.index({Slice(), 6})).clone().detach();
-    adv_f.index({Slice(2,-2), 0, 5}) = (-col_f.index({Slice(2,-2), 0, 7}) + abb_bc.index({Slice(), 7})).clone().detach();
-    adv_f.index({Slice(2,-2), 0, 6}) = (-col_f.index({Slice(2,-2), 0, 8}) + abb_bc.index({Slice(), 8})).clone().detach();
-
-    // right
-    u_w = (1.5*u.index(right) - 0.5*u.index(v_right)).clone().detach();
-    abb_bc = rho.index(right).unsqueeze(-1)*(
-      torch::mul( 2.0 + ics2*ics2*torch::matmul(u_w,E).pow(2.0) - ics2*(u_w*u_w).sum(1).unsqueeze(-1) ,W)
-    ).clone().detach();
-    adv_f.index({Slice(2,-2), -1, 3}) = (-col_f.index({Slice(2,-2), -1, 1}) + abb_bc.index({Slice(), 1})).clone().detach();
-    adv_f.index({Slice(2,-2), -1, 4}) = (-col_f.index({Slice(2,-2), -1, 2}) + abb_bc.index({Slice(), 2})).clone().detach();
-    adv_f.index({Slice(2,-2), -1, 1}) = (-col_f.index({Slice(2,-2), -1, 3}) + abb_bc.index({Slice(), 3})).clone().detach();
-    adv_f.index({Slice(2,-2), -1, 2}) = (-col_f.index({Slice(2,-2), -1, 4}) + abb_bc.index({Slice(), 4})).clone().detach();
-    adv_f.index({Slice(2,-2), -1, 7}) = (-col_f.index({Slice(2,-2), -1, 5}) + abb_bc.index({Slice(), 5})).clone().detach();
-    adv_f.index({Slice(2,-2), -1, 8}) = (-col_f.index({Slice(2,-2), -1, 6}) + abb_bc.index({Slice(), 6})).clone().detach();
-    adv_f.index({Slice(2,-2), -1, 5}) = (-col_f.index({Slice(2,-2), -1, 7}) + abb_bc.index({Slice(), 7})).clone().detach();
-    adv_f.index({Slice(2,-2), -1, 6}) = (-col_f.index({Slice(2,-2), -1, 8}) + abb_bc.index({Slice(), 8})).clone().detach();
-    */
   }
 
   void eval_omega3
   (
-    Tensor &omega,
+    Tensor &omega_,
     const Tensor &u,
     const Tensor &relax_params,
     const Tensor &eta,
     const Tensor &kappa,
-    const Tensor &rho_mix
+    const Tensor &rho_mix,
+    const Tensor &F,
+    const Tensor &F_norm
   )
   {
-    eval_omega1(omega1, rho, u);
-    eval_omega2(omega2, relax_params, eta);
+    eval_omega1(omega1, rho, u, relax_params);
+    //eval_omega2(omega2, relax_params, eta);
+    eval_reis_omega2(omega2, F, F_norm);
     Tensor rho_ratio = rho/rho_mix;
 
     // Tensor A = rho_ratio.unsqueeze(-1)*(omega1 + omega2);
 
-    omega.copy_(
+    omega_.copy_(
       // beta must be initialised with the appropiate sign
-      rho_ratio.unsqueeze(-1)*(omega1 + omega2) + beta*kappa
+      //rho_ratio.unsqueeze(-1)*(omega1 + omega2) + beta*kappa
+      omega1 + omega2
     );
   }
 
-  void eval_omega2(Tensor &omega, const Tensor &relax_params, const Tensor &eta)
+  void eval_reis_omega2(Tensor &omega_, const Tensor &F, const Tensor &F_norm)
+  {
+    omega_.copy_(
+        0.5*A*F_norm.unsqueeze(-1)*(
+      torch::mul( torch::matmul(F,E).pow(2.0)/(1e-20 + F_norm.pow(2.0).unsqueeze(-1)) ,W) - B )
+    );
+  }
+
+  void eval_omega2(Tensor &omega_, const Tensor &relax_params, const Tensor &eta)
   {
     // Tensor B = 1.0 - 0.5*relax_params.unsqueeze(-1);
-    omega.copy_(
+    omega_.copy_(
       A*(1.0 - 0.5*relax_params.unsqueeze(-1))*eta
     );
   }
 
-  void eval_omega1(Tensor &omega_, const Tensor &rho_, const Tensor &u)
+  void eval_omega1(Tensor &omega_, const Tensor &rho_, const Tensor &u, const Tensor &relax_params)
   {
     // TODO: Single or position wise relaxation parameter?
     eval_equilibrium(equ_f, rho_, u);
     omega_.copy_(
-      omega*(equ_f - adv_f)
+      relax_params.unsqueeze(-1)*(equ_f - adv_f)
     );
   }
 
@@ -328,19 +293,19 @@ private:
   const double s1, s2, s3, t2, t3;
 
   double init_s1(double r_tau, double b_tau)
-  { return 2.0*r_tau*b_tau/(r_tau + b_tau); }
+  { return 2.0*r_tau*b_tau/(r_tau+b_tau); }
 
   double init_s2(double r_tau, double s1, double delta)
-  { return 2.0*(r_tau - s1)/delta; }
+  { return 2.0*(r_tau-s1)/delta; }
 
   double init_s3(double s2, double delta)
-  { return -s2/delta; }
+  { return -s2/(2.0*delta); }
 
   double init_t2(double b_tau, double s1, double delta)
-  { return 2.0*(s1 + b_tau)/delta; }
+  { return 2.0*(s1-b_tau)/delta; }
 
   double init_t3(double t2, double delta)
-  { return -t2/delta; }
+  { return t2/(2.0*delta); }
 
   double eval(double psi) // Scalar function to evaluate the relaxation parameter
   {
@@ -397,9 +362,11 @@ double sigmoid(double x) { return 1.0/(1.0 + std::exp(-x)); }
 
 void init_rho(torch::Tensor &rho, double rho_0, double L_, double R, bool invert)
 {
-  int rows = rho.size(0);
-  int cols = rho.size(1);
-  double C = L_/2.0;
+  const int rows = rho.size(0);
+  const int cols = rho.size(1);
+  const double C = L_/2.0;
+  //const double h = 9.0;
+  const double factor = 2.0;
 
   for(int r=0; r<rows; r++)
   {
@@ -407,8 +374,22 @@ void init_rho(torch::Tensor &rho, double rho_0, double L_, double R, bool invert
     {
       double s = std::sqrt((r-C)*(r-C) + (c-C)*(c-C));
       double ans = 0.0;
-      if(invert) ans = 1.0 - sigmoid(2.0*(s-R));
-      else ans = sigmoid(2.0*(s-R));
+      if(invert)
+      {
+        // Fill the droplet
+        //if ( s < R) ans = 1.0;
+        //else if ( R <= s && s <= (R+h) )
+        ans = 1.0 - sigmoid(factor*(s-R));
+        //else ans = 0;
+      }
+      else
+      {
+        // Fill the sourrounding fluid
+        //if ( s < R ) ans = 0.0;
+        //else if ( R <= s && s <= (R+h) )
+        ans = sigmoid(factor*(s-R));
+        //else ans = 1.0;
+      }
       rho[r][c] = rho_0*ans;
     }
   }
@@ -442,21 +423,25 @@ void eval_kappa
   const Tensor &b_phi
 )
 {
-  // Tensor A = (r_rho*b_rho/rho.pow(2)).unsqueeze(-1);
-  // Tensor B = (r_rho.unsqueeze(-1)*r_phi + b_rho.unsqueeze(-1)*b_phi).squeeze(-1);
-  // Tensor C = torch::matmul(n,E)*B;
-  // Tensor D = A*C;
+  //Tensor A = (r_rho*b_rho/rho.pow(2)).unsqueeze(-1);
+  //Tensor B = (r_rho.unsqueeze(-1)*r_phi + b_rho.unsqueeze(-1)*b_phi).squeeze(-1);
+  //Tensor C = torch::matmul(n,E);
+  //Tensor D = A*C;
 
   kappa.copy_(
-    (r_rho*b_rho/rho.pow(2)).unsqueeze(-1) * torch::matmul(n,E)*(r_rho.unsqueeze(-1)*r_phi + b_rho.unsqueeze(-1)*b_phi).squeeze(-1)
+    (r_rho*b_rho/rho.pow(2)).unsqueeze(-1) * torch::matmul(n,E)
+    *(r_rho.unsqueeze(-1)*r_phi + b_rho.unsqueeze(-1)*b_phi).squeeze(-1)
   );
+  //cout << kappa.max() << endl;
+  //cout << kappa.min() << endl;
 }
 
 void eval_local_curvature(Tensor &K, const Tensor &n)
 {
-  K = (n.index({Ellipsis,0})*n.index({Ellipsis,1})*(partial.y(n.index({Ellipsis,0})) + partial.x(n.index({Ellipsis,1})))
-      - n.index({Ellipsis,0}).pow(2.0)*partial.y(n.index({Ellipsis,1})) - n.index({Ellipsis,1}).pow(2.0)*partial.x(n.index({Ellipsis,0})))
-    .clone().detach();
+  K = (
+    n.index({Ellipsis,0})*n.index({Ellipsis,1})*( partial.y(n.index({Ellipsis,0})) + partial.x(n.index({Ellipsis,1})) )
+      - n.index({Ellipsis,0}).pow(2.0)*partial.y(n.index({Ellipsis,1})) - n.index({Ellipsis,1}).pow(2.0)*partial.x(n.index({Ellipsis,0}))
+  ).clone().detach();
 }
 
 void eval_phase_field
@@ -471,6 +456,7 @@ void eval_phase_field
   rho_n = ((r_rho/r_rho_0 - b_rho/b_rho_0)
           /
           (r_rho/r_rho_0 + b_rho/b_rho_0)).clone().detach();
+  // rho_n = ( (r_rho - b_rho)/(r_rho + b_rho) ).clone().detach();
 }
 
 std::ostream& operator<<(std::ostream& os, const colour& c)
@@ -480,7 +466,7 @@ std::ostream& operator<<(std::ostream& os, const colour& c)
     << "cks2=" << c.cks2 << "\n"
     //<< "nu=" << c.nu << "\n"
     << "rho_0=" << c.rho_0 << "\n"
-    << "omega=" << c.omega << "\n"
+    << "omega=" << c.omega_rp << "\n"
     << "A=" << c.A << "\n"
     << "beta=" << c.beta << endl;
 }
@@ -492,6 +478,8 @@ int main()
   {
     std::cerr << "CUDA is NOT available\n";
   }
+  double minDouble = std::numeric_limits<double>::min();
+  std::cout << "Smallest positive double: " << minDouble << std::endl;
 
   // Macroscopic parameters
   Tensor u = torch::zeros({L,L,2}, dev);
@@ -503,7 +491,7 @@ int main()
   Tensor relax_params = torch::zeros({L,L},dev);
 
   // Interfacial tension
-  const double sigma = 0.1;
+  const double sigma = 5e-3;
   Tensor phase_field = torch::zeros({L,L}, dev);
   Tensor grad_pf = torch::zeros({L,L,2}, dev);
   Tensor grad_norm = torch::zeros({L,L}, dev);
@@ -511,20 +499,22 @@ int main()
   Tensor n = torch::zeros({L,L,2}, dev);
   Tensor Fs = torch::zeros({L,L,2}, dev);
 
-  colour r{/*R=*/L, /*C=*/L, /*rho_0=*/1.0, /*alpha=*/0.2, /*A=*/0.33333333, /*nu=*/0.1667, /*beta=*/0.7};
+  colour r{/*R=*/L, /*C=*/L, /*rho_0=*/1.2, /*alpha=*/1.0/3.0, /*A=*/1e-4, /*nu=*/0.16, /*beta=*/-0.7};
   cout << "RED" << r << endl;
-  colour b{/*R=*/L, /*C=*/L, /*rho_0=*/1.0, /*alpha=*/0.2, /*A=*/0.66666666, /*nu=*/0.1667, /*beta=*/-0.7};
+  colour b{/*R=*/L, /*C=*/L, /*rho_0=*/1.0, /*alpha=*/0.2, /*A=*/1e-4, /*nu=*/0.14, /*beta=*/+0.7};
   cout << "BLUE" << b << endl;
   // Initialise blue and red densities
   init_rho(r.rho, r.rho_0, L, Radius, true);
   r.eval_equilibrium(r.adv_f, r.rho, u);
   init_rho(b.rho, b.rho_0, L, Radius, false);
   b.eval_equilibrium(b.adv_f, b.rho, u);
-  //rho_mix.copy_(r.rho + b.rho);
+  r.rho.copy_( r.adv_f.sum(2) );
+  b.rho.copy_( b.adv_f.sum(2) );
+  rho_mix.copy_(r.rho + b.rho);
 
-  relaxation_function relax_func{r.omega, b.omega, /*delta=*/0.98};
+  relaxation_function relax_func{r.omega_rp, b.omega_rp, /*delta=*/0.98};
 
-  const int T = 300;
+  const int T = 500;
 
   // Results
   Tensor r_fs = torch::zeros({L,L,9,T});
@@ -541,6 +531,10 @@ int main()
   Tensor norms = torch::zeros_like(uxs);
   Tensor gradxs = torch::zeros_like(uxs);
   Tensor gradys = torch::zeros_like(uxs);
+  Tensor rparams = torch::zeros_like(uxs);
+  Tensor omega1s = torch::zeros_like(r_fs);
+  Tensor omega2s = torch::zeros_like(r_fs);
+  Tensor omega3s = torch::zeros_like(r_fs);
 
   cout << "main loop" << endl;
   cout << torch::tensor({0}) << endl;
@@ -556,15 +550,18 @@ int main()
                   + grad_pf.index({Ellipsis, 1}).pow(2))
     );
     norms.index({Ellipsis,t}) = grad_norm.clone().detach();
-    Tensor copy_grad_pf = torch::where
-    (
-      grad_norm.unsqueeze(-1) <= 0.5*grad_norm.max(),
-      torch::full_like(grad_pf, 0.0), grad_pf
-    );
+
     gradxs.index({Ellipsis,t}) = grad_pf.index({Ellipsis,0}).clone().detach();
     gradys.index({Ellipsis,t}) = grad_pf.index({Ellipsis,1}).clone().detach();
-
-    n = tnnf::normalize(copy_grad_pf, tnnf::NormalizeFuncOptions().p(2).dim(-1));
+    Tensor copy_grad_pf = torch::where
+    (
+      grad_norm.unsqueeze(-1) <= 0.1*grad_norm.max(),
+      torch::full_like(grad_pf, 0.0), grad_pf
+    );
+    n = -tnnf::normalize(copy_grad_pf, tnnf::NormalizeFuncOptions().p(2).dim(-1));
+    //n.copy_(
+    //  grad_pf/(1e5*grad_norm.min() + grad_norm.unsqueeze(-1))
+    //);
     nxs.index({Ellipsis,t}) = n.index({Ellipsis, 0}).clone().detach();
     nys.index({Ellipsis,t}) = n.index({Ellipsis, 1}).clone().detach();
 
@@ -576,14 +573,24 @@ int main()
     Fsys.index({Ellipsis,t}) = Fs.index({Ellipsis,1});
 
     eval_eta(eta, u, Fs);
-    eval_kappa(kappa, n, rho_mix, r.rho, r.phi, b.rho, b.phi);
+
+    eval_kappa
+      (/*kappa=*/kappa,
+       /*n=*/n,
+       /*rho=*/rho_mix,
+       /*r_rho=*/r.rho,
+       /*r_phi=*/r.phi, b.rho, b.phi);
     relax_func.eval(relax_params, phase_field);
     relax_params.pow_(-1);
+    rparams.index({Ellipsis,t}) = relax_params.clone().detach();
 
     // Time step
-    r.step(u, relax_params, eta, kappa, rho_mix);
+    r.step(u, relax_params, eta, kappa, rho_mix, grad_pf, grad_norm);
     r_fs.index_put_({Ellipsis,t}, r.adv_f);
-    b.step(u, relax_params, eta, kappa, rho_mix);
+    omega1s.index_put_({Ellipsis,t}, r.omega1);
+    omega2s.index_put_({Ellipsis,t}, r.omega2);
+    omega3s.index_put_({Ellipsis,t}, r.omega3);
+    b.step(u, relax_params, eta, kappa, rho_mix, grad_pf, grad_norm);
     b_fs.index_put_({Ellipsis,t}, b.adv_f);
 
     // solver::calc_rho(r.rho, r.adv_f);
@@ -591,9 +598,12 @@ int main()
     r.rho.copy_( r.adv_f.sum(2) );
     b.rho.copy_( b.adv_f.sum(2) );
     rho_mix.copy_(r.rho + b.rho);
+    //r.eval_equilibrium(r.equ_f, r.rho, u);
+    //r.eval_equilibrium(b.equ_f, b.rho, u);
+
 
     solver::calc_u(u, r.adv_f + b.adv_f, rho_mix.unsqueeze(-1));
-    u = (u + 0.5*Fs).clone().detach();
+    //u = (u + 0.5*Fs).clone().detach();
 
     uxs.index({Ellipsis,t}) = u.index({Ellipsis, 0}).clone().detach();
     uys.index({Ellipsis,t}) = u.index({Ellipsis, 1}).clone().detach();
@@ -614,6 +624,9 @@ int main()
   torch::save(Fsys,   "rk-static-droplet-fy.pt");
   torch::save(gradxs, "rk-static-droplet-gradx.pt");
   torch::save(gradys, "rk-static-droplet-grady.pt");
-
+  torch::save(rparams, "rk-static-droplet-rparams.pt");
+  torch::save(omega1s, "rk-static-droplet-omegas1.pt");
+  torch::save(omega2s, "rk-static-droplet-omegas2.pt");
+  torch::save(omega3s, "rk-static-droplet-omegas3.pt");
   return 0;
 }
