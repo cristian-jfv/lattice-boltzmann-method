@@ -55,6 +55,12 @@ target_link_libraries(utils "${TORCH_LIBRARIES}")
 target_include_directories(utils ${warning_guard} PUBLIC
 				"\$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src")
 
+add_library(rk OBJECT src/rk.cpp)
+set_property(TARGET rk PROPERTY CXX_STANDARD 17)
+target_link_libraries(rk "${TORCH_LIBRARIES}")
+target_include_directories(rk ${warning_guard} PUBLIC
+				"\$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src")
+
 # Executables
 add_executable(domain_boundaries_test test/domain_boundaries_test.cpp)
 set_property(TARGET domain_boundaries_test PROPERTY CXX_STANDARD 17)
@@ -101,3 +107,12 @@ set_property(TARGET rk_static_droplet_test PROPERTY CXX_STANDARD 17)
 target_link_libraries(rk_static_droplet_test
 		PRIVATE "${TORCH_LIBRARIES}" solver utils)
 
+add_executable(rk_droplet_test test/rk_droplet_test.cpp)
+set_property(TARGET rk_droplet_test PROPERTY CXX_STANDARD 17)
+target_link_libraries(rk_droplet_test
+		PRIVATE "${TORCH_LIBRARIES}" solver utils rk)
+
+add_executable(rk_rayleigh_taylor_test test/rk_rayleigh_taylor_test.cpp)
+set_property(TARGET rk_rayleigh_taylor_test PROPERTY CXX_STANDARD 17)
+target_link_libraries(rk_rayleigh_taylor_test
+		PRIVATE "${TORCH_LIBRARIES}" solver utils rk)
