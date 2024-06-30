@@ -55,10 +55,22 @@ target_link_libraries(utils "${TORCH_LIBRARIES}")
 target_include_directories(utils ${warning_guard} PUBLIC
 				"\$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src")
 
-add_library(rk OBJECT src/rk.cpp)
-set_property(TARGET rk PROPERTY CXX_STANDARD 17)
-target_link_libraries(rk "${TORCH_LIBRARIES}")
-target_include_directories(rk ${warning_guard} PUBLIC
+#add_library(rk OBJECT src/rk.cpp)
+#set_property(TARGET rk PROPERTY CXX_STANDARD 17)
+#target_link_libraries(rk "${TORCH_LIBRARIES}")
+#target_include_directories(rk ${warning_guard} PUBLIC
+#				"\$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src")
+
+add_library(colour OBJECT src/colour.cpp)
+set_property(TARGET colour PROPERTY CXX_STANDARD 17)
+target_link_libraries(colour "${TORCH_LIBRARIES}")
+target_include_directories(colour ${warning_guard} PUBLIC
+				"\$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src")
+
+add_library(differential OBJECT src/differential.cpp)
+set_property(TARGET differential PROPERTY CXX_STANDARD 17)
+target_link_libraries(differential "${TORCH_LIBRARIES}")
+target_include_directories(differential ${warning_guard} PUBLIC
 				"\$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src")
 
 # Executables
@@ -107,12 +119,22 @@ set_property(TARGET rk_static_droplet_test PROPERTY CXX_STANDARD 17)
 target_link_libraries(rk_static_droplet_test
 		PRIVATE "${TORCH_LIBRARIES}" solver utils)
 
-add_executable(rk_droplet_test test/rk_droplet_test.cpp)
-set_property(TARGET rk_droplet_test PROPERTY CXX_STANDARD 17)
-target_link_libraries(rk_droplet_test
-		PRIVATE "${TORCH_LIBRARIES}" solver utils rk)
+#add_executable(rk_droplet_test test/rk_droplet_test.cpp)
+#set_property(TARGET rk_droplet_test PROPERTY CXX_STANDARD 17)
+#target_link_libraries(rk_droplet_test
+#		PRIVATE "${TORCH_LIBRARIES}" solver utils rk)
+#
+#add_executable(rk_rayleigh_taylor_test test/rk_rayleigh_taylor_test.cpp)
+#set_property(TARGET rk_rayleigh_taylor_test PROPERTY CXX_STANDARD 17)
+#target_link_libraries(rk_rayleigh_taylor_test
+#		PRIVATE "${TORCH_LIBRARIES}" solver utils rk)
 
-add_executable(rk_rayleigh_taylor_test test/rk_rayleigh_taylor_test.cpp)
-set_property(TARGET rk_rayleigh_taylor_test PROPERTY CXX_STANDARD 17)
-target_link_libraries(rk_rayleigh_taylor_test
-		PRIVATE "${TORCH_LIBRARIES}" solver utils rk)
+add_executable(mrtcg_static_droplet test/mrtcg_static_droplet.cpp)
+set_property(TARGET mrtcg_static_droplet PROPERTY CXX_STANDARD 17)
+target_link_libraries(mrtcg_static_droplet
+		PRIVATE "${TORCH_LIBRARIES}" solver utils colour differential)
+
+add_executable(mrtcg_rayleigh_taylor test/mrtcg_rayleigh_taylor.cpp)
+set_property(TARGET mrtcg_rayleigh_taylor PROPERTY CXX_STANDARD 17)
+target_link_libraries(mrtcg_rayleigh_taylor
+		PRIVATE "${TORCH_LIBRARIES}" solver utils colour differential)
