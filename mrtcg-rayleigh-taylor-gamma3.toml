@@ -1,0 +1,21 @@
+delta = 0.1 # interface thickness for s_nu
+
+[domain]
+rows = 256
+columns = 128
+time_steps = 100000
+nr_snapshots = 1000
+
+[red]
+initial_density = 3.0
+alpha = 0.7
+kinematic_viscosity = 0.04
+interfacial_tension_control = 0.5 # A
+interface_thickness_control = 0.7 # beta
+
+[blue]
+initial_density = 1.0
+alpha = 0.1
+kinematic_viscosity = 0.04
+interfacial_tension_control = 0.5 # A
+interface_thickness_control = -0.7 # beta
