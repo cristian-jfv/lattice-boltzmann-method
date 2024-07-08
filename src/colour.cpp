@@ -16,7 +16,8 @@ nu{try_double(tbl, "kinematic_viscosity")},
 mu{nu*rho_0},
 beta{try_double(tbl, "interface_thickness_control")},
 cs2{init_cs2(alpha)},
-ics2{1.0/cs2}
+ics2{1.0/cs2},
+rlx{init_rlx_param(nu, cs2)}
 {
   phi    = torch::zeros({9}, torch::kCUDA);
   rho    = torch::zeros({rows,cols,1}, torch::kCUDA);
@@ -34,6 +35,8 @@ ics2{1.0/cs2}
 }
 
 double colour::init_cs2(double alpha){ return 3.0*(1.0-alpha)/5.0; }
+double colour::init_rlx_param(double nu, double cs2)
+{ return 1.0/( 0.5 + nu/cs2 ); }
 
 double colour::try_double(const toml::node_view<toml::node>& tbl, const std::string name)
 {
@@ -71,6 +74,7 @@ std::ostream& operator<<(std::ostream& os, const colour& c)
   << "\nbeta=" << c.beta
   << "\ncs2=" << c.cs2
   << "\nics2=" << c.ics2
+  << "\nrlx=" << c.rlx
   << std::endl;
 }
 

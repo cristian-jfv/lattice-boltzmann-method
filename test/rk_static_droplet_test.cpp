@@ -231,7 +231,7 @@ private:
 
     omega_.copy_(
       // beta must be initialised with the appropiate sign
-      //rho_ratio.unsqueeze(-1)*(omega1 + omega2) + beta*kappa
+      // rho_ratio.unsqueeze(-1)*(omega1 + omega2) + beta*kappa
       omega1 + omega2
     );
   }
@@ -429,8 +429,9 @@ void eval_kappa
   //Tensor D = A*C;
 
   kappa.copy_(
-    (r_rho*b_rho/rho.pow(2)).unsqueeze(-1) * torch::matmul(n,E)
-    *(r_rho.unsqueeze(-1)*r_phi + b_rho.unsqueeze(-1)*b_phi).squeeze(-1)
+    (r_rho*b_rho/rho/*.pow(2)*/).unsqueeze(-1)
+    *torch::mul(torch::matmul(-n,E),W)
+    //*(r_rho.unsqueeze(-1)*r_phi + b_rho.unsqueeze(-1)*b_phi).squeeze(-1)
   );
   //cout << kappa.max() << endl;
   //cout << kappa.min() << endl;
@@ -483,6 +484,7 @@ int main()
 
   // Macroscopic parameters
   Tensor u = torch::zeros({L,L,2}, dev);
+  u = 1e-15*u.normal_().clone().detach();
   Tensor rho_mix = torch::ones({L,L}, dev);
 
   // Colour-independet quantities
@@ -499,9 +501,9 @@ int main()
   Tensor n = torch::zeros({L,L,2}, dev);
   Tensor Fs = torch::zeros({L,L,2}, dev);
 
-  colour r{/*R=*/L, /*C=*/L, /*rho_0=*/1.2, /*alpha=*/1.0/3.0, /*A=*/1e-4, /*nu=*/0.16, /*beta=*/-0.7};
+  colour r{/*R=*/L, /*C=*/L, /*rho_0=*/1.2, /*alpha=*/1.0/3.0, /*A=*/1e-4, /*nu=*/0.16, /*beta=*/+0.7};
   cout << "RED" << r << endl;
-  colour b{/*R=*/L, /*C=*/L, /*rho_0=*/1.0, /*alpha=*/0.2, /*A=*/1e-4, /*nu=*/0.14, /*beta=*/+0.7};
+  colour b{/*R=*/L, /*C=*/L, /*rho_0=*/1.0, /*alpha=*/0.2, /*A=*/1e-4, /*nu=*/0.14, /*beta=*/-0.7};
   cout << "BLUE" << b << endl;
   // Initialise blue and red densities
   init_rho(r.rho, r.rho_0, L, Radius, true);
@@ -514,7 +516,7 @@ int main()
 
   relaxation_function relax_func{r.omega_rp, b.omega_rp, /*delta=*/0.98};
 
-  const int T = 500;
+  const int T = 2000;
 
   // Results
   Tensor r_fs = torch::zeros({L,L,9,T});
@@ -532,6 +534,7 @@ int main()
   Tensor gradxs = torch::zeros_like(uxs);
   Tensor gradys = torch::zeros_like(uxs);
   Tensor rparams = torch::zeros_like(uxs);
+  Tensor kappas = torch::zeros_like(r_fs);
   Tensor omega1s = torch::zeros_like(r_fs);
   Tensor omega2s = torch::zeros_like(r_fs);
   Tensor omega3s = torch::zeros_like(r_fs);
@@ -580,6 +583,7 @@ int main()
        /*rho=*/rho_mix,
        /*r_rho=*/r.rho,
        /*r_phi=*/r.phi, b.rho, b.phi);
+    kappas.index({Ellipsis,t}) = kappa.clone().detach();
     relax_func.eval(relax_params, phase_field);
     relax_params.pow_(-1);
     rparams.index({Ellipsis,t}) = relax_params.clone().detach();
@@ -625,6 +629,7 @@ int main()
   torch::save(gradxs, "rk-static-droplet-gradx.pt");
   torch::save(gradys, "rk-static-droplet-grady.pt");
   torch::save(rparams, "rk-static-droplet-rparams.pt");
+  torch::save(kappas, "rk-static-droplet-kappas.pt");
   torch::save(omega1s, "rk-static-droplet-omegas1.pt");
   torch::save(omega2s, "rk-static-droplet-omegas2.pt");
   torch::save(omega3s, "rk-static-droplet-omegas3.pt");

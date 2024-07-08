@@ -87,7 +87,7 @@ void rk::eval_kappa
 )
 {
   kappa.copy_(
-    r_rho*b_rho*torch::matmul(F_kl, E)*phi/rho
+    r_rho*b_rho*torch::matmul(F_kl/(norm_F_kl+1e-20), unit_E)*phi/rho
   );
 }
 
@@ -119,8 +119,8 @@ void rk::eval_colour_gradient
 
   // Normalize gradient
   //utils::print(norm_F_kl.sizes());
-  norm_F_kl.where(norm_F_kl < 1e-1, 0.0);
-  F_kl.where(norm_F_kl < 1e-1, 0.0);
+  // norm_F_kl.masked_fill_(norm_F_kl < 1e-2*norm_F_kl.max(), 0.0);
+  // F_kl.masked_fill_(norm_F_kl < 1e-2*norm_F_kl.max(), 0.0);
   // F_kl.div_(norm_F_kl + 1e-20);
 }
 
@@ -169,10 +169,16 @@ void rk::eval_C_kl
   const torch::Tensor& b_rho
 )
 {
+/*
   C_kl.copy_(
     ( eta/(r_rho_0*b_rho_0) )*r_rho*b_rho
   );
   C_kl.masked_fill_(C_kl>1.0, 1.0);
+*/
+  C_kl.copy_(
+    1.0 - torch::abs( ( r_rho - b_rho ) / ( r_rho + b_rho ) )
+  );
+  // C_kl.masked_fill_(C_kl < 0.5, 0.0);
 }
 
 void rk::eval_omega_rp
@@ -183,7 +189,7 @@ void rk::eval_omega_rp
 )
 {
   omega_rp.copy_(
-    rho/( r_rho*r_nu + b_rho*b_nu + 0.5*rho )
+    rho/( 3.0*r_rho*r_nu + 3.0*b_rho*b_nu + 0.5*rho )
   );
 }
 
@@ -242,40 +248,4 @@ beta{beta}
   rho.copy_(init_rho);
 }
 
-torch::nn::Conv2d diff_op::initialize_convolution(const torch::Tensor &kernel)
-{
-  auto conv_options = torch::nn::Conv2dOptions(
-    /*in_channels=*/1, /*out_channels=*/1, /*kernel_size=*/5)
-                               .padding({2,2})
-                               .padding_mode(torch::kReplicate)
-                               .bias(false);
 
-  torch::nn::Conv2d ans(conv_options);
-  ans->weight = (xi*kernel).reshape({1, 1, 5, 5}).clone().detach();
-  ans->bias = torch::tensor({0.0},torch::TensorOptions().dtype(torch::kDouble).device(torch::kCUDA));
-  return ans;
-}
-
-diff_op::diff_op()
-{
-  partial_x = initialize_convolution(kernel_partial_x);
-  partial_y = initialize_convolution(kernel_partial_y);
-}
-
-torch::Tensor diff_op::x(const torch::Tensor &psi)
-{
-  return partial_x->forward(psi.unsqueeze(0).unsqueeze(0).squeeze(-1))
-  .squeeze(0).squeeze(0).clone().detach();
-}
-
-torch::Tensor diff_op::y(const torch::Tensor &psi)
-{
-  return partial_y->forward(psi.unsqueeze(0).unsqueeze(0).squeeze(-1))
-  .squeeze(0).squeeze(0).clone().detach();
-}
-
-void diff_op::grad(torch::Tensor &ans, const torch::Tensor &psi)
-{
-  ans.index({torch::indexing::Ellipsis,0}) = x(psi).clone().detach();
-  ans.index({torch::indexing::Ellipsis,1}) = y(psi).clone().detach();
-}

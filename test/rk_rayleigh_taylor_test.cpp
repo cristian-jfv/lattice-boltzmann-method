@@ -40,18 +40,36 @@ void apply_boundary_conditions
 )
 {
   // Complete the post-advection population using the post-collision populations
-  adv_f.index(left) = col_f.index(right).detach().clone();
-  adv_f.index(right) = col_f.index(left).detach().clone();
+  // adv_f.index(left) = col_f.index(right).detach().clone();
+  // adv_f.index(right) = col_f.index(left).detach().clone();
   // adv_f.index(top) = col_f.index(bottom).clone().detach();
   // adv_f.index(bottom) = col_f.index(top).clone().detach();
 
-  adv_f.index({-1, Slice(), 4}) = col_f.index({-1, Slice(), 2}).detach().clone();
-  adv_f.index({-1, Slice(), 7}) = col_f.index({-1, Slice(), 5}).detach().clone();
-  adv_f.index({-1, Slice(), 8}) = col_f.index({-1, Slice(), 6}).detach().clone();
+  // left and right
+  // adv_f.index({Slice(), -1, 3}) = col_f.index({Slice(), -1, 1}).clone().detach();
+  // adv_f.index({Slice(), -1, 7}) = col_f.index({Slice(), -1, 5}).clone().detach();
+  // adv_f.index({Slice(), -1, 6}) = col_f.index({Slice(), -1, 8}).clone().detach();
 
-  adv_f.index({0, Slice(), 2}) = col_f.index({0, Slice(), 4}).detach().clone();
-  adv_f.index({0, Slice(), 5}) = col_f.index({0, Slice(), 7}).detach().clone();
-  adv_f.index({0, Slice(), 6}) = col_f.index({0, Slice(), 8}).detach().clone();
+  // adv_f.index({Slice(), 0, 1}) = col_f.index({Slice(), 0, 3}).clone().detach();
+  // adv_f.index({Slice(), 0, 5}) = col_f.index({Slice(), 0, 7}).clone().detach();
+  // adv_f.index({Slice(), 0, 8}) = col_f.index({Slice(), 0, 6}).clone().detach();
+
+  // inlet-oulet
+  adv_f.index({Slice(), 0, 1}) = col_f.index({Slice(),-1, 1});
+  adv_f.index({Slice(), 0, 5}) = col_f.index({Slice(),-1, 5});
+  adv_f.index({Slice(), 0, 8}) = col_f.index({Slice(),-1, 8});
+
+  adv_f.index({Slice(),-1, 3}) = col_f.index({Slice(), 0, 3});
+  adv_f.index({Slice(),-1, 6}) = col_f.index({Slice(), 0, 6});
+  adv_f.index({Slice(),-1, 7}) = col_f.index({Slice(), 0, 7});
+
+  adv_f.index({ 0, Slice(), 4}) = col_f.index({ 0, Slice(), 2}).detach().clone();
+  adv_f.index({ 0, Slice(), 7}) = col_f.index({ 0, Slice(), 5}).detach().clone();
+  adv_f.index({ 0, Slice(), 8}) = col_f.index({ 0, Slice(), 6}).detach().clone();
+
+  adv_f.index({-1, Slice(), 2}) = col_f.index({-1, Slice(), 4}).detach().clone();
+  adv_f.index({-1, Slice(), 5}) = col_f.index({-1, Slice(), 7}).detach().clone();
+  adv_f.index({-1, Slice(), 6}) = col_f.index({-1, Slice(), 8}).detach().clone();
 }
 
 int main()
@@ -60,15 +78,19 @@ int main()
   const auto dev = torch::kCUDA;
   torch::set_default_dtype(caffe2::scalarTypeToTypeMeta(torch::kDouble));
 
-  const int T = 10000; // time steps
+  const int T = 100000; // time steps
+  const int snaps = 2000;
+  const int div = 50;
+  cout << T - div*snaps << endl;
   const int L_ = 256; // domain size
   const int R = 4*L_;
   const int C = L_;
 
-  const double sigma=1e-1;
+  const double sigma=0.1;
   const double nu=0.04;
+
   // 1.- Initialization of densities and velocities
-  colour r{R,C,/*alpha=*/11.0/15.0, /*rho_0=*/3.0, /*nu=*/nu, /*beta=*/-0.7,
+  colour r{R,C,/*alpha=*/11.0/15.0, /*rho_0=*/3.0, /*nu=*/nu, /*beta=*/0.7,
     init_rho(3.0, R, C, true)};
   // betas for both colours should be equal
   // here the definitions use opposite signs to be able to use the same kappa tensor
@@ -92,8 +114,6 @@ int main()
   Tensor f =      torch::zeros({R,C,9}, dev); // colour-blind dist. function
   Tensor adv_f  = torch::zeros({R,C,9}, dev);
 
-  const int snaps = 1000;
-  const int div = 10;
   Tensor r_rhos = torch::zeros({R,C,snaps});
   Tensor b_rhos = torch::zeros({R,C,snaps});
   Tensor uxs  =   torch::zeros({R,C,snaps});

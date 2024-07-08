@@ -177,6 +177,8 @@ const Tensor unit_E = E/torch::tensor(
   {1.0, 1.0, 1.0, 1.0, 1.0, std::sqrt(2), std::sqrt(2), std::sqrt(2), std::sqrt(2)},
   torch::TensorOptions().dtype(torch::kDouble).device(torch::kCUDA));
 
+const Tensor E_rep = E.unsqueeze(0).unsqueeze(0).repeat({1024,256,1,1}).clone().detach();
+
 double sigmoid(double x) { return 1.0/(1.0 + std::exp(-x)); }
 
 Tensor init_rho_cosine(int R, int C, double rho_0, bool invert)
@@ -191,7 +193,7 @@ Tensor init_rho_cosine(int R, int C, double rho_0, bool invert)
   {
     for(int c=0; c<cols; c++)
     {
-      double s = middle - 0.1*C*std::cos(2.0*3.141592*c/C);
+      double s = middle + 0.1*C*std::cos(2.0*3.141592*c/C);
       double ans = 0.0;
       if(invert)
       {
@@ -312,8 +314,23 @@ void eval_kappa
 )
 {
   kappa.copy_(
-    ( r_rho*b_rho*grad.matmul(unit_E)*( r_rho*r_phi + b_rho*b_phi ) )
+    ( r_rho*b_rho*grad.matmul(E)*( r_rho*r_phi + b_rho*b_phi ) )
     /(rho.pow(2)*(1e-20+grad_norm))
+  );
+}
+
+void eval_ba_kappa
+(
+  Tensor& kappa,
+  const Tensor& r_rho,
+  const Tensor& b_rho,
+  const Tensor& rho,
+  const Tensor& grad,
+  const Tensor& grad_norm
+)
+{
+  kappa.copy_(
+    W.mul( (r_rho*b_rho*grad.matmul(E))/ ((1e-20 + grad_norm)*rho) )
   );
 }
 
@@ -332,6 +349,37 @@ void update_C
   );
   C.index_put_({Ellipsis,7},
                (1.0-0.5*s_nu)*(DxQx - DyQy)
+  );
+}
+
+void eval_local_curvature(Tensor &K, const Tensor &n)
+{
+  K.copy_((
+    n.index({Ellipsis,0})*n.index({Ellipsis,1})
+    *( D.y(n.index({Ellipsis,0})) + D.x(n.index({Ellipsis,1})) )
+    - n.index({Ellipsis,0}).pow(2.0)*D.y(n.index({Ellipsis,1}))
+    - n.index({Ellipsis,1}).pow(2.0)*D.x(n.index({Ellipsis,0}))
+  ).unsqueeze(-1));
+}
+
+void eval_eta(Tensor &eta, const Tensor &u, const Tensor &Fs)
+{
+  // eta is defined as the color independent part of the perturbation operator
+  // TODO: define factor for the second term in the expression
+  // Tensor A = ics2*(E_rep - u.unsqueeze(-1));
+  // Tensor B = ics2*(E_u.unsqueeze(-2)*E);
+  // Tensor C = A+B;
+  // Tensor D = ((A+B)*Fs.unsqueeze(-1)).sum(2);
+
+  eta.copy_(
+    torch::mul(
+      (
+        (
+          3.0*(E_rep - u.unsqueeze(-1))
+          + 9.0*(torch::matmul(u,E).unsqueeze(-2)*E)
+        )*Fs.unsqueeze(-1)
+      ).sum(2)
+    , W)
   );
 }
 
@@ -358,7 +406,9 @@ int main(int argc, char* argv[])
   }
 
   const double sigma = try_value<double>(tbl["general"], "sigma");
+  cout << "sigma=" << sigma << endl;
   const double gravity_magnitude = try_value<double>(tbl["general"], "gravity_magnitude");
+  cout << "gravity_magnitude=" << gravity_magnitude << endl;
   const std::string name = try_value<std::string>(tbl["general"], "name");
 
   const domain domain{tbl["domain"]};
@@ -377,6 +427,12 @@ int main(int argc, char* argv[])
   Tensor total_f = torch::zeros({domain.R,domain.C,9}, torch::kCUDA);
   Tensor rho = torch::zeros({domain.R,domain.C,1}, torch::kCUDA);
   Tensor u   = torch::zeros({domain.R,domain.C,2}, torch::kCUDA);
+
+  Tensor n   = torch::zeros({domain.R,domain.C,2}, torch::kCUDA);
+  Tensor K   = torch::zeros({domain.R,domain.C,1}, torch::kCUDA);
+  Tensor interf_tension   = torch::zeros({domain.R,domain.C,2}, torch::kCUDA);
+  Tensor eta   = torch::zeros({domain.R,domain.C,9}, torch::kCUDA);
+
   Tensor phase_field = torch::zeros({domain.R,domain.C,1}, torch::kCUDA);
   Tensor grad = torch::zeros({domain.R,domain.C,2}, torch::kCUDA);
   Tensor grad_norm = torch::zeros({domain.R,domain.C,1}, torch::kCUDA);
@@ -394,8 +450,8 @@ int main(int argc, char* argv[])
   Tensor uys  = torch::zeros({domain.R,domain.C,domain.nr_snapshots});
   Tensor s_nus= torch::zeros({domain.R,domain.C,domain.nr_snapshots});
   Tensor phases = torch::zeros({domain.R,domain.C,domain.nr_snapshots});
-  // Tensor gradx  = torch::zeros({domain.R,domain.C,domain.nr_snapshots});
-  // Tensor grady  = torch::zeros({domain.R,domain.C,domain.nr_snapshots});
+  Tensor gradx  = torch::zeros({domain.R,domain.C,domain.nr_snapshots});
+  Tensor grady  = torch::zeros({domain.R,domain.C,domain.nr_snapshots});
   // Tensor omega1 = torch::zeros({domain.R,domain.C,9,domain.nr_snapshots});
   // Tensor omega2 = torch::zeros({domain.R,domain.C,9,domain.nr_snapshots});
   // Tensor omega3 = torch::zeros({domain.R,domain.C,9,domain.nr_snapshots});
@@ -405,17 +461,19 @@ int main(int argc, char* argv[])
   const double ics2 = 3.0;
   const double ics4 = 9.0;
   rho.copy_(r.rho + b.rho);
-  //u = (u + 0.5*Fg.t()/rho).detach().clone();
+  u = (u + 0.5*Fg.t()/r.rho_0).detach().clone();
   eval_equilibrium(r.adv_f, r.rho, r.phi, r.eta, u);
   eval_equilibrium(b.adv_f, b.rho, b.phi, b.eta, u);
   int t_{0};
   cout << "main loop" << endl;
+  cout << torch::tensor({0}) << endl;
   for (int t=0; t < domain.T; t++)
   {
 
     if (t%domain.period_snapshots==0)
     {
       t_ = t/domain.period_snapshots;
+      cout << t << "/" << domain.T << "\t\r";
       rhos.index_put_({Ellipsis,t_}, rho.squeeze(-1));
       uxs.index_put_({Ellipsis,t_}, u.index({Ellipsis,0}));
       uys.index_put_({Ellipsis,t_}, u.index({Ellipsis,1}));
@@ -424,8 +482,8 @@ int main(int argc, char* argv[])
       // omega1.index_put_({Ellipsis,t_}, r.omega1);
       // omega2.index_put_({Ellipsis,t_}, r.omega2);
       // omega3.index_put_({Ellipsis,t_}, r.omega3);
-      // gradx.index_put_({Ellipsis,t_}, grad.index({Ellipsis,0}));
-      // grady.index_put_({Ellipsis,t_}, grad.index({Ellipsis,1}));
+      gradx.index_put_({Ellipsis,t_}, interf_tension.index({Ellipsis,0}));
+      grady.index_put_({Ellipsis,t_}, interf_tension.index({Ellipsis,1}));
     }
 
     eval_equilibrium(r.equ_f, r.rho, r.phi, r.eta, u);
@@ -446,12 +504,21 @@ int main(int argc, char* argv[])
       torch::sqrt(grad.index({Ellipsis,0}).pow(2) + grad.index({Ellipsis,1}).pow(2)).unsqueeze(-1)
     );
     //grad.masked_fill_(grad_norm<=1e-1*grad_norm.max(), 0.0);
-    eval_xi(xi, grad, grad_norm);
-    A.copy_( 4.5*sigma*s_nu.unsqueeze(-1) );
-    eval_per_operator(r.omega2, A, xi);
-    eval_per_operator(b.omega2, A, xi);
+
+    n.copy_(-grad/(1e-20 + grad_norm));
+    eval_local_curvature(K, n);
+    interf_tension.copy_(-0.5*sigma*K*grad);
+    eval_eta(eta, u, interf_tension);
+    r.omega2.copy_(r.A*(1.0-0.5*r.rlx)*eta);
+    b.omega2.copy_(b.A*(1.0-0.5*b.rlx)*eta);
+
+    // eval_xi(xi, grad, grad_norm);
+    // A.copy_( 4.5*sigma*s_nu.unsqueeze(-1) );
+    // eval_per_operator(r.omega2, A, xi);
+    // eval_per_operator(b.omega2, A, xi);
 
     eval_kappa(kappa, r.rho, b.rho, rho, grad, grad_norm, r.phi, b.phi);
+    //eval_ba_kappa(kappa, r.rho, b.rho, rho, grad, grad_norm);
     total_f.copy_(r.adv_f + r.omega1 + r.omega2 + b.adv_f + b.omega1 + b.omega2);
     eval_rec_operator(r.omega3, total_f, r.rho, rho, r.beta, kappa);
     eval_rec_operator(b.omega3, total_f, b.rho, rho, b.beta, kappa);
@@ -474,7 +541,7 @@ int main(int argc, char* argv[])
     rho.copy_(r.rho+b.rho);
 
     solver::calc_u(u, r.adv_f+b.adv_f, rho);
-    u = (u + 0.5*Fg.t()/rho).detach().clone();
+    u = (u + 0.5*(Fg.t()+ interf_tension )/rho).detach().clone();
   }
 
   cout << "save snapshots" << endl;
@@ -483,8 +550,8 @@ int main(int argc, char* argv[])
   torch::save(uys,    name + "-mrtcg-rayleigh-taylor-uys.pt");
   torch::save(s_nus,  name + "-mrtcg-rayleigh-taylor-snus.pt");
   torch::save(phases, name + "-mrtcg-rayleigh-taylor-phases.pt");
-  // torch::save(gradx, "mrtcg-rayleigh-taylor-gradx-" + name + ".pt");
-  // torch::save(grady, "mrtcg-rayleigh-taylor-grady-" + name + ".pt");
+  torch::save(gradx,  name + "-mrtcg-rayleigh-taylor-gradx.pt");
+  torch::save(grady,  name + "-mrtcg-rayleigh-taylor-grady.pt");
   // torch::save(omega1, "mrtcg-rayleigh-taylor-omega1.pt");
   // torch::save(omega2, "mrtcg-rayleigh-taylor-omega2.pt");
   // torch::save(omega3, "mrtcg-rayleigh-taylor-omega3.pt");

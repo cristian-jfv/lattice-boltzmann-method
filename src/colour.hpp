@@ -17,6 +17,7 @@ class colour
   const double beta;
   const double cs2; // speed of sound
   const double ics2; // 1/speed of sound
+  const double rlx; // relaxation parameter
 
   torch::Tensor rho;
   torch::Tensor p;
@@ -37,6 +38,7 @@ class colour
   double init_cs2(double alpha);
   void init_eta(torch::Tensor& eta_, double cs2, const torch::Tensor& E);
   void init_phi(torch::Tensor& phi_, double alpha);
+  double init_rlx_param(double nu, double cs2);
 };
 
 std::ostream& operator<<(std::ostream& os, const colour& p);

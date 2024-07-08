@@ -138,3 +138,14 @@ add_executable(mrtcg_rayleigh_taylor test/mrtcg_rayleigh_taylor.cpp)
 set_property(TARGET mrtcg_rayleigh_taylor PROPERTY CXX_STANDARD 17)
 target_link_libraries(mrtcg_rayleigh_taylor
 		PRIVATE "${TORCH_LIBRARIES}" solver utils colour differential)
+
+add_executable(mrtcg_multiple_mode_rayleigh_taylor test/mrtcg_multiple_mode_rayleigh_taylor.cpp)
+set_property(TARGET mrtcg_multiple_mode_rayleigh_taylor PROPERTY CXX_STANDARD 17)
+target_link_libraries(mrtcg_multiple_mode_rayleigh_taylor
+		PRIVATE "${TORCH_LIBRARIES}" solver utils colour differential)
+
+add_executable(mrt_rayleigh_taylor test/mrt_rayleigh_taylor.cpp)
+set_property(TARGET mrt_rayleigh_taylor PROPERTY CXX_STANDARD 17)
+target_link_libraries(mrt_rayleigh_taylor
+		PRIVATE "${TORCH_LIBRARIES}" solver utils colour differential)
+

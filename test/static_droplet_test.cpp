@@ -142,80 +142,74 @@ struct relaxation_function
 {
 private:
   const double delta;
-  const double r_s_nu;
-  const double b_s_nu;
-  const double beta, gamma, epsilon, eta, xi;
+  const double r_tau;
+  const double b_tau;
+  const double s1, s2, s3, t2, t3;
 
-  double init_s_nu(double nu, double cs2)
-  { return 1.0/( 0.5 + nu/cs2 ); }
+  double init_s1(double r_tau, double b_tau)
+  { return 2.0*r_tau*b_tau/(r_tau+b_tau); }
 
-  double init_beta(double r_s_nu, double b_s_nu)
-  { return 2.0*r_s_nu*b_s_nu/(r_s_nu + b_s_nu); }
+  double init_s2(double r_tau, double s1, double delta)
+  { return 2.0*(r_tau-s1)/delta; }
 
-  double init_gamma(double r_s_nu, double beta, double delta)
-  { return 2.0*(r_s_nu - beta)/delta; }
+  double init_s3(double s2, double delta)
+  { return -s2/(2.0*delta); }
 
-  double init_epsilon(double gamma, double delta)
-  { return -gamma/(2.0*delta); }
+  double init_t2(double b_tau, double s1, double delta)
+  { return 2.0*(s1-b_tau)/delta; }
 
-  double init_eta(double b_s_nu, double beta, double delta)
-  { return 2.0*(beta - b_s_nu)/delta; }
-
-  double init_xi(double eta, double delta)
-  { return eta/(2.0*delta); }
+  double init_t3(double t2, double delta)
+  { return t2/(2.0*delta); }
 
   double eval(double psi) // Scalar function to evaluate the relaxation parameter
   {
-    if (psi > delta) return r_s_nu;
-    else if (delta >= psi && psi > 0) return beta + gamma*psi + epsilon*psi*psi;
-    else if (0 >= psi && psi >= -delta) return beta + eta*psi + xi*psi*psi;
-    return b_s_nu;
+    if (psi > delta) return r_tau;
+    else if (delta >= psi && psi > 0) return s1 + s2*psi + s3*psi*psi;
+    else if (0 >= psi && psi >= -delta) return s1 + t2*psi + t3*psi*psi;
+    return b_tau;
   }
 
 public:
-  relaxation_function(double r_nu, double r_cs2, double b_nu, double b_cs2, double delta):
+  relaxation_function(double r_omega, double b_omega,  double delta):
   delta{delta},
-  r_s_nu{init_s_nu(r_nu, r_cs2)},
-  b_s_nu{init_s_nu(b_nu, b_cs2)},
-  beta{init_beta(r_s_nu, b_s_nu)},
-  gamma{init_gamma(r_s_nu, beta, delta)},
-  epsilon{init_epsilon(gamma, delta)},
-  eta{init_eta(b_s_nu, beta, delta)},
-  xi{init_xi(eta, delta)}
+  r_tau{1.0/r_omega},
+  b_tau{1.0/b_omega},
+  s1{init_s1(r_tau, b_tau)},
+  s2{init_s2(/*r_tau=*/r_tau, /*s1=*/s1, delta)},
+  s3{init_s3(s2, delta)},
+  t2{init_t2(/*b_tau=*/b_tau, s1, delta)},
+  t3{init_t3(t2, delta)}
   {
     // k_nu: kinematic viscosity
     // k_cs2: squared numeric sound speed
-    cout << "s_nu parameters" << "\n"
+    std::cout << "\ns_nu parameters" << "\n"
       << "delta=" << delta << "\n"
-      << "r_s_nu=" << r_s_nu << "\n"
-      << "b_s_nu=" << b_s_nu << "\n"
-      << "beta=" << beta << "\n"
-      << "gamma=" << gamma << "\n"
-      << "epsilon=" << epsilon << "\n"
-      << "eta=" << eta << "\n"
-      << "xi=" << xi << endl;
+      << "r_tau=" << r_tau << "\n"
+      << "b_tau=" << b_tau << "\n"
+      << "s1=" << s1 << "\n"
+      << "s2=" << s2 << "\n"
+      << "s3=" << s3 << "\n"
+      << "t2=" << t2 << "\n"
+      << "t3=" << t3 << std::endl;
   }
 
   void eval(torch::Tensor &s_nu, const torch::Tensor &psi_)
   {
     auto psi = psi_.squeeze(-1).clone().detach();
     auto bmask = (psi > delta);
-    s_nu.masked_fill_(bmask, r_s_nu);
+    s_nu.masked_fill_(bmask, r_tau);
 
     bmask.copy_( (delta >= psi) * (psi > 0.0) );
-    auto elements = beta + gamma*psi + epsilon*psi*psi;
+    auto elements = s1 + s2*psi + s3*psi*psi;
     s_nu = torch::where(bmask, elements, s_nu);
-    //s_nu.masked_fill_(mask.to(torch::kBool), beta + gamma*psi + epsilon*psi*psi);
 
     bmask.copy_( (0.0 >= psi) * (psi >= -delta) );
-    elements.copy_(beta + eta*psi + xi*psi*psi);
+    elements.copy_(s1 + t2*psi + t3*psi*psi);
     s_nu = torch::where(bmask, elements, s_nu);
-    //s_nu.masked_fill_(mask.to(torch::kBool), beta + eta*psi + xi*psi*psi);
 
     bmask.copy_( psi < -delta );
-    s_nu.masked_fill_(bmask, b_s_nu);
+    s_nu.masked_fill_(bmask, b_tau);
   }
-
 };
 
 class color
@@ -321,12 +315,13 @@ private:
     update_m_eq(u);
     update_C(u, s_nu);
     update_S(s_nu);
-    /*
+
     Omega.copy_(
       (S.transpose(2,3).matmul(( f.matmul(M) - m_eq + A*(1.0 - 0.5*omega)*F ).unsqueeze(-1)).squeeze(-1) + C)
       .matmul(Mi)
     );
-    */
+
+    /*
     Tensor EQU = equilibrium(u);
     const int Rows = f.size(0);
     const int Cols = f.size(1);
@@ -344,7 +339,7 @@ private:
                           )
                         );
       }
-    }
+    }*/
 
   }
 
@@ -409,8 +404,8 @@ private:
   }
   double init_beta(bool invert)
   {
-    //if (invert) return 0.7;
-    return 0.7;
+    if (invert) return 0.7;
+    return -0.7;
   }
 
   double init_omega(double nu, double cs2) { return 0.5 + nu/cs2; }
@@ -488,7 +483,7 @@ int main(int argc, char *argv[])
   cout << "RED" << r << endl;
   color b{L, R, /*rho_0=*/1.0, /*alpha=*/0.2, /*nu=*/0.1667, /*A=*/0.5};
   cout << "BLUE" << b << endl;
-  relaxation_function s_nu_function{r.nu, r.cs2, b.nu, b.cs2, /*delta=*/0.1};
+  relaxation_function s_nu_function{r.omega, b.omega, 0.1};
   Tensor u = torch::zeros({L, L, 2}, dev);
   Tensor rho_mix = torch::zeros({L, L, 1}, dev);
   Tensor s_nu = torch::zeros({L, L}, dev);
@@ -518,6 +513,7 @@ int main(int argc, char *argv[])
   Tensor norms = torch::zeros_like(uxs);
   Tensor gradxs = torch::zeros_like(uxs);
   Tensor gradys = torch::zeros_like(uxs);
+  Tensor s_nus = torch::zeros_like(uxs);
   // Main loop
   cout << "main loop start" << endl;
   cout << torch::tensor({0.0}) << endl;
@@ -541,20 +537,23 @@ int main(int argc, char *argv[])
 
     //n = grad_rho_n/torch::norm(rho_n, 2, -1).unsqueeze(-1);
     //normalize_grad(n, grad_rho_n, grad_norm);
-    n = torch::nn::functional::normalize(grad_rho_n,
+    n = -torch::where(grad_norm >= 1e-1,
+                     torch::nn::functional::normalize(grad_rho_n,
                                          torch::nn::functional::NormalizeFuncOptions()
-                                         .p(2).dim(-1));
+                                         .p(2).dim(-1)),
+                     torch::full_like(grad_rho_n, 0.0));
     //n = torch::where(torch::abs(n) <= 1e-1, torch::full_like(n, 0.0), n);
     nxs.index({Ellipsis,t}) = n.index({Ellipsis, 0}).clone().detach();
     nys.index({Ellipsis,t}) = n.index({Ellipsis, 1}).clone().detach();
-    eval_local_curvature(K, n);
+    eval_local_curvature(K,-n);
     Ks.index({Ellipsis,t}) = K.squeeze(-1);
-    F_s = -0.5*sigma*K*grad_rho_n;
+    F_s.copy_( 0.5*sigma*K*grad_rho_n );
     Fsxs.index({Ellipsis,t}) = F_s.index({Ellipsis,0});
     Fsys.index({Ellipsis,t}) = F_s.index({Ellipsis,1});
     build_F(F, u, F_s);
     s_nu_function.eval(s_nu, rho_n);
-
+    s_nu.pow_(-1.0);
+    s_nus.index({Ellipsis,t}) = s_nu.detach().clone();
     // Step: collision and advection
     r.step(/*rho_mix=*/rho_mix, /*rho_other=*/b.rho, /*u=*/u, /*F=*/F, /*s_nu=*/s_nu, /*n=*/n);
     b.step(rho_mix, r.rho, u, F, s_nu, n);
@@ -569,7 +568,7 @@ int main(int argc, char *argv[])
     rho_mix.copy_(r.rho + b.rho);
 
     solver::calc_u(u, r.f + b.f, rho_mix);
-    u = u + 0.5*F_s/rho_mix;
+    u.copy_(u + 0.5*F_s/rho_mix);
     // Save snapshots
     uxs.index({Ellipsis,t}) = u.index({Ellipsis, 0}).clone().detach();
     uys.index({Ellipsis,t}) = u.index({Ellipsis, 1}).clone().detach();
@@ -591,6 +590,7 @@ int main(int argc, char *argv[])
   torch::save(Fsys, "static-droplet-fy.pt");
   torch::save(gradxs, "static-droplet-gradx.pt");
   torch::save(gradys, "static-droplet-grady.pt");
+  torch::save(s_nus, "static-droplet-s_nus.pt");
 
   return 0;
 }
