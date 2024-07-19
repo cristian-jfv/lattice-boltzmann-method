@@ -150,3 +150,7 @@ set_property(TARGET mrt_rayleigh_taylor PROPERTY CXX_STANDARD 17)
 target_link_libraries(mrt_rayleigh_taylor
 		PRIVATE "${TORCH_LIBRARIES}" solver utils colour differential)
 
+add_executable(decompose_domain test/decompose_domain.cpp)
+set_property(TARGET decompose_domain PROPERTY CXX_STANDARD 17)
+target_link_libraries(decompose_domain
+		PRIVATE "${TORCH_LIBRARIES}" solver utils domain)
