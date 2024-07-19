@@ -154,3 +154,8 @@ add_executable(decompose_domain test/decompose_domain.cpp)
 set_property(TARGET decompose_domain PROPERTY CXX_STANDARD 17)
 target_link_libraries(decompose_domain
 		PRIVATE "${TORCH_LIBRARIES}" solver utils domain)
+
+add_executable(decompose_domain_loop test/decompose_domain_loop.cpp)
+set_property(TARGET decompose_domain_loop PROPERTY CXX_STANDARD 17)
+target_link_libraries(decompose_domain_loop
+		PRIVATE "${TORCH_LIBRARIES}" solver utils domain)

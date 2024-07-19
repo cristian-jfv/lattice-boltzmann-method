@@ -1,6 +1,8 @@
 #include "domain.hpp"
 
-domain::domain(int R, int C, int Q)
+domain::domain(int R, int C, int Q):
+R{R},
+C{C}
 {
   adve_f = torch::zeros({R,C,Q}, torch::kCUDA);
   equi_f = torch::zeros({R,C,Q}, torch::kCUDA);

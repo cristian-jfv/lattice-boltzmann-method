@@ -4,6 +4,8 @@
 
 struct domain
 {
+  const int R;
+  const int C;
   torch::Tensor adve_f;
   torch::Tensor equi_f;
   torch::Tensor coll_f;

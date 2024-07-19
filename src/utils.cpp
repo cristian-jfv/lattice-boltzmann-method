@@ -9,7 +9,7 @@ bool continue_execution()
   char choice{'a'};
   while (true)
   {
-    std::cout << "Do you want to continue (y/n)? ";
+    std::cout << "\nDo you want to continue (y/n)? ";
     std::cin >> choice;
     if (choice == 'y') return true;
     else if (choice == 'n') return false;
