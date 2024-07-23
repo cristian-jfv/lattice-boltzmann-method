@@ -73,6 +73,12 @@ target_link_libraries(differential "${TORCH_LIBRARIES}")
 target_include_directories(differential ${warning_guard} PUBLIC
 				"\$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src")
 
+add_library(ulbm OBJECT src/ulbm.cpp)
+set_property(TARGET ulbm PROPERTY CXX_STANDARD 17)
+target_link_libraries(ulbm "${TORCH_LIBRARIES}")
+target_include_directories(ulbm ${warning_guard} PUBLIC
+				"\$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src")
+
 # Executables
 
 add_executable(horizontal_poiseuille_test test/horizontal_poiseuille_test.cpp)
@@ -159,3 +165,13 @@ add_executable(decompose_domain_loop test/decompose_domain_loop.cpp)
 set_property(TARGET decompose_domain_loop PROPERTY CXX_STANDARD 17)
 target_link_libraries(decompose_domain_loop
 		PRIVATE "${TORCH_LIBRARIES}" solver utils domain)
+
+add_executable(ulbm_poiseuille test/ulbm_poiseuille.cpp)
+set_property(TARGET ulbm_poiseuille PROPERTY CXX_STANDARD 17)
+target_link_libraries(ulbm_poiseuille
+		PRIVATE "${TORCH_LIBRARIES}" solver utils ulbm)
+
+add_executable(ulbm_double_shear_flow test/ulbm_double_shear_flow.cpp)
+set_property(TARGET ulbm_double_shear_flow PROPERTY CXX_STANDARD 17)
+target_link_libraries(ulbm_double_shear_flow
+		PRIVATE "${TORCH_LIBRARIES}" solver utils ulbm)
