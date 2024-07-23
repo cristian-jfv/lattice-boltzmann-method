@@ -68,11 +68,11 @@ int main()
   const int T = 10000;
   const int snapshot_period = 10;
   print("T", T);
-  const int H = 256;
-  const int W = 256;
+  const int H = 128;
+  const int W = 128;
   cout << "H=" << H << "; W=" << W << endl;
 
-  const double nu = 3.413333E-4;
+  const double nu = 1.70766666E-4;
   const double omega = 1.0/(0.5 + 3.0*nu);
   const double tau = 1.0/omega;
   print("nu", nu);
